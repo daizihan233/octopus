@@ -41,6 +41,6 @@ jobs:
 
       - name: Trigger release build
         run: |
-          gh workflow run release.yml --ref master
+          gh workflow run release.yaml --ref master
         env:
           GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
