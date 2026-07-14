@@ -524,13 +524,8 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 		return 0, fmt.Errorf("mimocode: no non-system messages")
 	}
 
-	// 3. 解析 model（providerID/modelID）
-	providerID := "mimo"
-	modelID := ra.internalRequest.Model
-	if idx := strings.Index(modelID, "/"); idx > 0 {
-		providerID = modelID[:idx]
-		modelID = modelID[idx+1:]
-	}
+	// 3. 解析 model（providerID/modelID），以 backend 实际使用为准
+	providerID, modelID := client.ResolveModel(ctx, ra.internalRequest.Model)
 
 	// 4. 发送 prompt
 	prompt := miMoPrompt{

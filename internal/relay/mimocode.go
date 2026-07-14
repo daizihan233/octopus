@@ -245,6 +245,35 @@ type miMoProviders struct {
 		ID     string   `json:"id"`
 		Models []string `json:"models"`
 	} `json:"providers"`
+	Default map[string]string `json:"default"`
+}
+
+// ResolveModel 解析模型名，若 backend 返回了实际使用的模型则以响应为准。
+func (c *MiMoCodeClient) ResolveModel(ctx context.Context, requestedModel string) (providerID, modelID string) {
+	providerID = "mimo"
+	modelID = requestedModel
+	if idx := strings.Index(modelID, "/"); idx > 0 {
+		providerID = modelID[:idx]
+		modelID = modelID[idx+1:]
+	}
+
+	// 若是 auto 或无法识别的模型，尝试用 backend 默认模型
+	resp, err := c.doRequest(ctx, http.MethodGet, "/config/providers", nil)
+	if err != nil {
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return
+	}
+	var providers miMoProviders
+	if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
+		return
+	}
+	if defaultModel, ok := providers.Default[providerID]; ok && (modelID == "auto" || modelID == "") {
+		modelID = defaultModel
+	}
+	return
 }
 
 func (c *MiMoCodeClient) FetchModels(ctx context.Context) ([]string, error) {
