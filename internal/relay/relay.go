@@ -544,13 +544,13 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	}
 
 	// 5. 等待 SSE 事件收集完成
-	content, reasoning, err := collector.Wait()
+	content, reasoning, usage, err := collector.Wait()
 	if err != nil {
 		return 0, fmt.Errorf("mimocode collect response: %w", err)
 	}
 
 	// 6. 组装 OpenAI 格式响应
-	resp := BuildOpenAIResponse(ra.internalRequest.Model, content, reasoning, nil)
+	resp := BuildOpenAIResponse(ra.internalRequest.Model, content, reasoning, usage)
 	ra.c.Header("Content-Type", "application/json")
 	ra.c.JSON(http.StatusOK, resp)
 	return http.StatusOK, nil
