@@ -144,11 +144,10 @@ type miMoError struct {
 
 // ResponseCollector 异步收集 SSE 事件，支持先订阅后发 prompt 的流程。
 type ResponseCollector struct {
-	content   string
+	content  string
 	reasoning string
-	usage     *miMoUsage
-	err       error
-	done      chan struct{}
+	err      error
+	done     chan struct{}
 }
 
 // StartCollect 后台启动 SSE 事件收集，调用方需在收集启动后发送 prompt。
@@ -156,24 +155,24 @@ func (c *MiMoCodeClient) StartCollect(ctx context.Context, sessionID string, tim
 	rc := &ResponseCollector{done: make(chan struct{})}
 	go func() {
 		defer close(rc.done)
-		rc.content, rc.reasoning, rc.usage, rc.err = c.CollectResponse(ctx, sessionID, timeout)
+		rc.content, rc.reasoning, rc.err = c.CollectResponse(ctx, sessionID, timeout)
 	}()
 	return rc
 }
 
 // Wait 阻塞等待 SSE 收集完成。
-func (rc *ResponseCollector) Wait() (content string, reasoning string, usage *miMoUsage, err error) {
+func (rc *ResponseCollector) Wait() (content string, reasoning string, err error) {
 	<-rc.done
-	return rc.content, rc.reasoning, rc.usage, rc.err
+	return rc.content, rc.reasoning, rc.err
 }
 
-func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, timeout time.Duration) (content string, reasoning string, usage *miMoUsage, err error) {
+func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, timeout time.Duration) (content string, reasoning string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/event", nil)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("create event request: %w", err)
+		return "", "", fmt.Errorf("create event request: %w", err)
 	}
 	if c.AuthHeader != "" {
 		req.Header.Set("Authorization", c.AuthHeader)
@@ -182,18 +181,17 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("connect event stream: %w", err)
+		return "", "", fmt.Errorf("connect event stream: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", nil, fmt.Errorf("event stream %d", resp.StatusCode)
+		return "", "", fmt.Errorf("event stream %d", resp.StatusCode)
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var contentB, reasoningB strings.Builder
-	var collectedUsage *miMoUsage
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -212,7 +210,7 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 
 		switch event.Type {
 		case "session.idle":
-			return contentB.String(), reasoningB.String(), collectedUsage, nil
+			return contentB.String(), reasoningB.String(), nil
 
 		case "session.error":
 			var miMoErr miMoError
@@ -220,7 +218,7 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 				errJSON, _ := json.Marshal(errData)
 				json.Unmarshal(errJSON, &miMoErr)
 			}
-			return contentB.String(), reasoningB.String(), collectedUsage,
+			return contentB.String(), reasoningB.String(),
 				fmt.Errorf("mimocode: %s: %s", miMoErr.Name, miMoErr.Data.Message)
 
 		case "message.part.delta":
@@ -241,12 +239,6 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 				continue
 			}
 			partType, _ := partJSON["type"].(string)
-
-			// step-finish 里包含 token 用量
-			if partType == "step-finish" {
-				collectedUsage = extractTokenUsage(partJSON)
-			}
-
 			partText, _ := partJSON["text"].(string)
 			if partText == "" {
 				continue
@@ -263,29 +255,9 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 	}
 
 	if err := scanner.Err(); err != nil {
-		return contentB.String(), reasoningB.String(), collectedUsage, fmt.Errorf("event stream read: %w", err)
+		return contentB.String(), reasoningB.String(), fmt.Errorf("event stream read: %w", err)
 	}
-	return contentB.String(), reasoningB.String(), collectedUsage, fmt.Errorf("event stream ended without session.idle")
-}
-
-// extractTokenUsage 从 step-finish 的 part 中提取 token 用量。
-// opencode 协议格式：{ "tokens": { "total": N, "input": N, "output": N, "reasoning": N, "cache": { "read": N, "write": N } } }
-func extractTokenUsage(part map[string]interface{}) *miMoUsage {
-	tokens, ok := part["tokens"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	u := &miMoUsage{}
-	if v, ok := tokens["input"].(float64); ok {
-		u.Input = int(v)
-	}
-	if v, ok := tokens["output"].(float64); ok {
-		u.Output = int(v)
-	}
-	if v, ok := tokens["reasoning"].(float64); ok {
-		u.Reasoning = int(v)
-	}
-	return u
+	return contentB.String(), reasoningB.String(), fmt.Errorf("event stream ended without session.idle")
 }
 
 // --- Model Fetch ---
