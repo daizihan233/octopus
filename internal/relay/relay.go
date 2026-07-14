@@ -527,6 +527,8 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	// 强制流式 + usage
 	bodyMap["stream"] = true
 	bodyMap["stream_options"] = map[string]any{"include_usage": true}
+	// 用 relay 选路后的实际模型名覆盖客户端传的名称
+	bodyMap["model"] = ra.internalRequest.Model
 
 	// 删除上游不理解的字段
 	for _, key := range []string{"response_format"} {
