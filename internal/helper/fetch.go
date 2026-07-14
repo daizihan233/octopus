@@ -204,10 +204,10 @@ func fetchMiMoCodeModels(client *http.Client, ctx context.Context, request model
 	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/config/providers", nil)
 	req.Header.Set("Content-Type", "application/json")
-	// opencode 使用 Basic auth: opencode:<password>
+	// mimocode 使用 Basic auth: mimocode:<password>
 	key := request.GetChannelKey().ChannelKey
 	if key != "" {
-		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("opencode:"+key)))
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("mimocode:"+key)))
 	}
 
 	resp, err := client.Do(req)
