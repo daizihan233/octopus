@@ -235,6 +235,11 @@ func parseRequest(c *gin.Context, inboundType llm.APIFormat, inAdapter transform
 
 // forward 转发请求到上游服务
 func (ra *relayAttempt) forward() (int, error) {
+	// MiMoCode: 绕过 axonhub pipeline，直接走 opencode 协议
+	if ra.outAdapter == nil && ra.channel.Type == dbmodel.ChannelTypeMiMoCode {
+		return ra.forwardMiMoCode()
+	}
+
 	ctx := ra.c.Request.Context()
 	if ra.internalRequest.RawRequest == nil {
 		return 0, fmt.Errorf("missing raw request")
@@ -499,4 +504,56 @@ func (in *parsedRequestInbound) TransformRequest(ctx context.Context, request *h
 	// relay 已经为选路解析过请求；pipeline 入口复用该结果，避免每次通道尝试再次解析同一份 body。
 	in.request.RawRequest = request
 	return in.request, nil
+}
+
+// forwardMiMoCode 直接通过 opencode 协议与 mimo serve 后端通信。
+func (ra *relayAttempt) forwardMiMoCode() (int, error) {
+	ctx := ra.c.Request.Context()
+	client := NewMiMoCodeClient(ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey)
+
+	// 1. 创建 session
+	sessionID, err := client.CreateSession(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("mimocode create session: %w", err)
+	}
+	defer client.DeleteSession(context.Background(), sessionID)
+
+	// 2. 转换消息格式
+	systemMsg, parts := ConvertMessages(ra.internalRequest.Messages)
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("mimocode: no non-system messages")
+	}
+
+	// 3. 解析 model（providerID/modelID）
+	providerID := "opencode"
+	modelID := ra.internalRequest.Model
+	if idx := strings.Index(modelID, "/"); idx > 0 {
+		providerID = modelID[:idx]
+		modelID = modelID[idx+1:]
+	}
+
+	// 4. 发送 prompt
+	prompt := miMoPrompt{
+		Model: miMoModel{
+			ProviderID: providerID,
+			ModelID:    modelID,
+		},
+		Parts:  parts,
+		System: systemMsg,
+	}
+	if err := client.SendPrompt(ctx, sessionID, prompt); err != nil {
+		return 0, fmt.Errorf("mimocode send prompt: %w", err)
+	}
+
+	// 5. 收集 SSE 事件
+	content, reasoning, err := client.CollectResponse(ctx, sessionID, 3*time.Minute)
+	if err != nil {
+		return 0, fmt.Errorf("mimocode collect response: %w", err)
+	}
+
+	// 6. 组装 OpenAI 格式响应
+	resp := BuildOpenAIResponse(ra.internalRequest.Model, content, reasoning, nil)
+	ra.c.Header("Content-Type", "application/json")
+	ra.c.JSON(http.StatusOK, resp)
+	return http.StatusOK, nil
 }

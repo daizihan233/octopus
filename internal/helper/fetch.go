@@ -2,6 +2,7 @@ package helper
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -23,6 +24,8 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 		fetchModel, err = fetchAnthropicModels(client, ctx, request)
 	case llm.APIFormatGeminiContents:
 		fetchModel, err = fetchGeminiModels(client, ctx, request)
+	case model.ChannelTypeMiMoCode:
+		fetchModel, err = fetchMiMoCodeModels(client, ctx, request)
 	default:
 		fetchModel, err = fetchOpenAIModels(client, ctx, request)
 	}
@@ -195,4 +198,42 @@ func applyCustomHeaders(req *http.Request, channel model.Channel) {
 			req.Header.Set(header.HeaderKey, header.HeaderValue)
 		}
 	}
+}
+
+func fetchMiMoCodeModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
+	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/config/providers", nil)
+	req.Header.Set("Content-Type", "application/json")
+	// opencode 使用 Basic auth: opencode:<password>
+	key := request.GetChannelKey().ChannelKey
+	if key != "" {
+		req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("opencode:"+key)))
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	var providers struct {
+		Providers []struct {
+			ID     string   `json:"id"`
+			Models []string `json:"models"`
+		} `json:"providers"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&providers); err != nil {
+		return nil, err
+	}
+
+	var models []string
+	for _, p := range providers.Providers {
+		for _, m := range p.Models {
+			models = append(models, p.ID+"/"+m)
+		}
+	}
+	return models, nil
 }
