@@ -511,47 +511,69 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	ctx := ra.c.Request.Context()
 	client := NewMiMoCodeClient(ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey)
 
-	// 1. 创建 session
 	sessionID, err := client.CreateSession(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("mimocode create session: %w", err)
 	}
 	defer client.DeleteSession(context.Background(), sessionID)
 
-	// 2. 转换消息格式
 	systemMsg, parts := ConvertMessages(ra.internalRequest.Messages)
 	if len(parts) == 0 {
 		return 0, fmt.Errorf("mimocode: no non-system messages")
 	}
 
-	// 3. 解析 model（providerID/modelID），以 backend 实际使用为准
 	providerID, modelID := client.ResolveModel(ctx, ra.internalRequest.Model)
-
-	// 4. 先启动 SSE 收集，再发 prompt（否则会错过事件）
-	collector := client.StartCollect(ctx, sessionID, 3*time.Minute)
-	time.Sleep(100 * time.Millisecond) // 等 SSE 连接就绪
+	actualModel := fmt.Sprintf("%s/%s", providerID, modelID)
 
 	prompt := miMoPrompt{
-		Model: miMoModel{
-			ProviderID: providerID,
-			ModelID:    modelID,
-		},
+		Model:  miMoModel{ProviderID: providerID, ModelID: modelID},
 		Parts:  parts,
 		System: systemMsg,
 	}
+
+	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
+		// 流式：先连 SSE 再发 prompt，边收边转发
+		ra.c.Header("Content-Type", "text/event-stream")
+		ra.c.Header("Cache-Control", "no-cache")
+		ra.c.Header("Connection", "keep-alive")
+
+		streamer := client.StartStream(ctx, sessionID, 3*time.Minute, actualModel, ra.c.Writer)
+		time.Sleep(100 * time.Millisecond)
+
+		if err := client.SendPrompt(ctx, sessionID, prompt); err != nil {
+			return 0, fmt.Errorf("mimocode send prompt: %w", err)
+		}
+
+		content, reasoning, err := streamer.Wait()
+		respBody := BuildOpenAIResponse(actualModel, content, reasoning, nil)
+		ra.metrics.InternalResponse, _ = json.Marshal(respBody)
+		if err != nil {
+			return http.StatusOK, err
+		}
+		return http.StatusOK, nil
+	}
+
+	// 非流式：先收集完整响应再返回
+	collector := client.StartCollect(ctx, sessionID, 3*time.Minute)
+	time.Sleep(100 * time.Millisecond)
+
 	if err := client.SendPrompt(ctx, sessionID, prompt); err != nil {
 		return 0, fmt.Errorf("mimocode send prompt: %w", err)
 	}
 
-	// 5. 等待 SSE 事件收集完成
 	content, reasoning, err := collector.Wait()
 	if err != nil {
 		return 0, fmt.Errorf("mimocode collect response: %w", err)
 	}
 
-	// 6. 组装 OpenAI 格式响应
-	resp := BuildOpenAIResponse(ra.internalRequest.Model, content, reasoning, nil)
+	resp := BuildOpenAIResponse(actualModel, content, reasoning, nil)
 	ra.c.Header("Content-Type", "application/json")
 	ra.c.JSON(http.StatusOK, resp)
+	ra.metrics.InternalResponse, _ = json.Marshal(resp)
 	return http.StatusOK, nil
+}
+
+func mustJSON(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }

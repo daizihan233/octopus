@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/looplj/axonhub/llm"
 )
 
@@ -142,6 +143,133 @@ type miMoError struct {
 	} `json:"data"`
 }
 
+// StreamToClient 从 MiMoCode SSE 事件流中边读边转发给客户端，返回聚合内容用于日志。
+func (c *MiMoCodeClient) StreamToClient(ctx context.Context, sessionID string, timeout time.Duration, model string, w gin.ResponseWriter) (content string, reasoning string, err error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/event", nil)
+	if err != nil {
+		return "", "", fmt.Errorf("create event request: %w", err)
+	}
+	if c.AuthHeader != "" {
+		req.Header.Set("Authorization", c.AuthHeader)
+	}
+	req.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("connect event stream: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("event stream %d", resp.StatusCode)
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var contentB, reasoningB strings.Builder
+	partTypeMap := map[string]string{} // partID → type (reasoning/text)
+	id := fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli())
+
+	writeChunk := func(delta map[string]interface{}) {
+		fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+			"id": id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": model,
+			"choices": []map[string]interface{}{{"index": 0, "delta": delta, "finish_reason": nil}},
+		}))
+		w.Flush()
+	}
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+
+		var event miMoEvent
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			continue
+		}
+
+		if sid, _ := event.Properties["sessionID"].(string); sid != "" && sid != sessionID {
+			continue
+		}
+
+		switch event.Type {
+		case "session.idle":
+			fmt.Fprintf(w, "data: %s\n\n", mustJSON(map[string]interface{}{
+				"id": id, "object": "chat.completion.chunk", "created": time.Now().Unix(), "model": model,
+				"choices": []map[string]interface{}{{"index": 0, "delta": map[string]interface{}{}, "finish_reason": "stop"}},
+			}))
+			fmt.Fprintf(w, "data: [DONE]\n\n")
+			w.Flush()
+			return contentB.String(), reasoningB.String(), nil
+
+		case "session.error":
+			var miMoErr miMoError
+			if d, ok := event.Properties["error"].(map[string]interface{}); ok {
+				b, _ := json.Marshal(d)
+				json.Unmarshal(b, &miMoErr)
+			}
+			return contentB.String(), reasoningB.String(), fmt.Errorf("mimocode: %s: %s", miMoErr.Name, miMoErr.Data.Message)
+
+		case "message.part.updated":
+			// 记录 partID → type 映射，delta 事件不带 type 信息
+			if part, ok := event.Properties["part"].(map[string]interface{}); ok {
+				if pid, _ := part["id"].(string); pid != "" {
+					if pt, _ := part["type"].(string); pt != "" {
+						partTypeMap[pid] = pt
+					}
+				}
+			}
+
+		case "message.part.delta":
+			partID, _ := event.Properties["partID"].(string)
+			delta, _ := event.Properties["delta"].(string)
+			if delta == "" {
+				continue
+			}
+			if partTypeMap[partID] == "reasoning" {
+				reasoningB.WriteString(delta)
+				writeChunk(map[string]interface{}{"reasoning_content": delta})
+			} else {
+				contentB.WriteString(delta)
+				writeChunk(map[string]interface{}{"content": delta})
+			}
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return contentB.String(), reasoningB.String(), fmt.Errorf("event stream read: %w", err)
+	}
+	return contentB.String(), reasoningB.String(), fmt.Errorf("event stream ended without session.idle")
+}
+
+// StreamStreamer 异步流式转发 SSE 事件。
+type StreamStreamer struct {
+	content   string
+	reasoning string
+	err       error
+	done      chan struct{}
+}
+
+// StartStream 后台启动流式转发，边从 MiMoCode 读事件边写给客户端。
+func (c *MiMoCodeClient) StartStream(ctx context.Context, sessionID string, timeout time.Duration, model string, w gin.ResponseWriter) *StreamStreamer {
+	s := &StreamStreamer{done: make(chan struct{})}
+	go func() {
+		defer close(s.done)
+		s.content, s.reasoning, s.err = c.StreamToClient(ctx, sessionID, timeout, model, w)
+	}()
+	return s
+}
+
+// Wait 阻塞等待流式转发完成。
+func (s *StreamStreamer) Wait() (content string, reasoning string, err error) {
+	<-s.done
+	return s.content, s.reasoning, s.err
+}
+
 // ResponseCollector 异步收集 SSE 事件，支持先订阅后发 prompt 的流程。
 type ResponseCollector struct {
 	content  string
@@ -192,6 +320,7 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 
 	var contentB, reasoningB strings.Builder
+	partTypeMap := map[string]string{}
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -221,25 +350,18 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 			return contentB.String(), reasoningB.String(),
 				fmt.Errorf("mimocode: %s: %s", miMoErr.Name, miMoErr.Data.Message)
 
-		case "message.part.delta":
-			field, _ := event.Properties["field"].(string)
-			delta, _ := event.Properties["delta"].(string)
-			if delta == "" {
-				continue
-			}
-			if field == "reasoning" {
-				reasoningB.WriteString(delta)
-			} else {
-				contentB.WriteString(delta)
-			}
-
 		case "message.part.updated":
 			partJSON, ok := event.Properties["part"].(map[string]interface{})
 			if !ok {
 				continue
 			}
-			partType, _ := partJSON["type"].(string)
+			if pid, _ := partJSON["id"].(string); pid != "" {
+				if pt, _ := partJSON["type"].(string); pt != "" {
+					partTypeMap[pid] = pt
+				}
+			}
 			partText, _ := partJSON["text"].(string)
+			partType, _ := partJSON["type"].(string)
 			if partText == "" {
 				continue
 			}
@@ -250,6 +372,18 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 			case "text":
 				contentB.Reset()
 				contentB.WriteString(partText)
+			}
+
+		case "message.part.delta":
+			partID, _ := event.Properties["partID"].(string)
+			delta, _ := event.Properties["delta"].(string)
+			if delta == "" {
+				continue
+			}
+			if partTypeMap[partID] == "reasoning" {
+				reasoningB.WriteString(delta)
+			} else {
+				contentB.WriteString(delta)
 			}
 		}
 	}

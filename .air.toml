@@ -1,0 +1,31 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "cd web; pnpm install; pnpm run build; cd ..; rm .\\static\\out\\ -Force -Recurse; mv -Path .\\web\\out\\ -Destination .\\static\\ -Force; go build -o ./tmp/octopus.exe ."
+bin = "tmp/octopus.exe"
+entrypoint = ["./tmp/octopus.exe", "start"]
+include_ext = ["go"]
+exclude_dir = ["tmp", "web", "static", "data", "build", "scripts", ".idea", ".mimocode"]
+exclude_regex = ["_test\\.go"]
+exclude_unchanged = true
+delay = 1000
+stop_on_error = true
+send_interrupt = true
+kill_delay = 500
+
+[log]
+time = false
+
+[color]
+main = "magenta"
+watcher = "cyan"
+build = "yellow"
+runner = "green"
+
+[misc]
+clean_on_exit = true
+
+[screen]
+clear_on_rebuild = true
+keep_scroll = true
