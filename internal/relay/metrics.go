@@ -34,6 +34,19 @@ type RelayMetrics struct {
 	ParamOverride string
 }
 
+func (m *RelayMetrics) applyActualModel() {
+	if len(m.InternalResponse) == 0 {
+		return
+	}
+	var resp struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(m.InternalResponse, &resp); err != nil || resp.Model == "" {
+		return
+	}
+	m.ActualModel = resp.Model
+}
+
 func (m *RelayMetrics) RecordUsage(usage *llm.Usage) {
 	if usage == nil {
 		return
@@ -63,6 +76,8 @@ func (m *RelayMetrics) RecordUsage(usage *llm.Usage) {
 }
 
 func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
+	// 以响应中的实际 model 为准（部分提供商支持 auto 智能路由）
+	m.applyActualModel()
 	duration := time.Since(m.StartTime)
 
 	globalStats := model.StatsMetrics{
