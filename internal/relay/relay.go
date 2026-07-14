@@ -527,7 +527,10 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	// 3. 解析 model（providerID/modelID），以 backend 实际使用为准
 	providerID, modelID := client.ResolveModel(ctx, ra.internalRequest.Model)
 
-	// 4. 发送 prompt
+	// 4. 先启动 SSE 收集，再发 prompt（否则会错过事件）
+	collector := client.StartCollect(ctx, sessionID, 3*time.Minute)
+	time.Sleep(100 * time.Millisecond) // 等 SSE 连接就绪
+
 	prompt := miMoPrompt{
 		Model: miMoModel{
 			ProviderID: providerID,
@@ -540,8 +543,8 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 		return 0, fmt.Errorf("mimocode send prompt: %w", err)
 	}
 
-	// 5. 收集 SSE 事件
-	content, reasoning, err := client.CollectResponse(ctx, sessionID, 3*time.Minute)
+	// 5. 等待 SSE 事件收集完成
+	content, reasoning, err := collector.Wait()
 	if err != nil {
 		return 0, fmt.Errorf("mimocode collect response: %w", err)
 	}

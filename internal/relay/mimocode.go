@@ -142,6 +142,30 @@ type miMoError struct {
 	} `json:"data"`
 }
 
+// ResponseCollector 异步收集 SSE 事件，支持先订阅后发 prompt 的流程。
+type ResponseCollector struct {
+	content  string
+	reasoning string
+	err      error
+	done     chan struct{}
+}
+
+// StartCollect 后台启动 SSE 事件收集，调用方需在收集启动后发送 prompt。
+func (c *MiMoCodeClient) StartCollect(ctx context.Context, sessionID string, timeout time.Duration) *ResponseCollector {
+	rc := &ResponseCollector{done: make(chan struct{})}
+	go func() {
+		defer close(rc.done)
+		rc.content, rc.reasoning, rc.err = c.CollectResponse(ctx, sessionID, timeout)
+	}()
+	return rc
+}
+
+// Wait 阻塞等待 SSE 收集完成。
+func (rc *ResponseCollector) Wait() (content string, reasoning string, err error) {
+	<-rc.done
+	return rc.content, rc.reasoning, rc.err
+}
+
 func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, timeout time.Duration) (content string, reasoning string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -180,7 +204,6 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 			continue
 		}
 
-		// 过滤其他 session 的事件
 		if eventSessionID, _ := event.Properties["sessionID"].(string); eventSessionID != "" && eventSessionID != sessionID {
 			continue
 		}
@@ -220,7 +243,6 @@ func (c *MiMoCodeClient) CollectResponse(ctx context.Context, sessionID string, 
 			if partText == "" {
 				continue
 			}
-			// 用 finalized text 覆盖 delta 累积（更完整）
 			switch partType {
 			case "reasoning":
 				reasoningB.Reset()
