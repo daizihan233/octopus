@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -506,70 +507,70 @@ func (in *parsedRequestInbound) TransformRequest(ctx context.Context, request *h
 	return in.request, nil
 }
 
-// forwardMiMoCode 直接通过 opencode 协议与 mimo serve 后端通信。
+// forwardMiMoCode 直接调用 api.xiaomimimo.com 的 OpenAI 兼容接口。
 func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	ctx := ra.c.Request.Context()
-	client := NewMiMoCodeClient(ra.channel.GetBaseUrl(), ra.usedKey.ChannelKey)
+	httpClient := &http.Client{Timeout: 5 * time.Minute}
+	jwtMgr := newMiMoJWTManager(ra.channel.GetBaseUrl(), httpClient)
+	sessionAffinity := fmt.Sprintf("ses_%x", time.Now().UnixMilli())
 
-	sessionID, err := client.CreateSession(ctx)
+	// 注入 magic prefix 到 system message
+	messages := injectMiMoMagicPrefix(ra.internalRequest.Messages)
+
+	reqBody := &miMoChatRequest{
+		Model:     ra.internalRequest.Model,
+		Messages:  messages,
+		Stream:    true,
+		MaxTokens: ra.internalRequest.MaxTokens,
+	}
+	if ra.internalRequest.Temperature != nil {
+		reqBody.Temperature = ra.internalRequest.Temperature
+	}
+	if ra.internalRequest.TopP != nil {
+		reqBody.TopP = ra.internalRequest.TopP
+	}
+
+	resp, err := miMoChat(ctx, jwtMgr, ra.channel.GetBaseUrl(), reqBody, sessionAffinity)
 	if err != nil {
-		return 0, fmt.Errorf("mimocode create session: %w", err)
+		return 0, fmt.Errorf("mimocode chat: %w", err)
 	}
-	defer client.DeleteSession(context.Background(), sessionID)
+	defer resp.Body.Close()
 
-	systemMsg, parts := ConvertMessages(ra.internalRequest.Messages)
-	if len(parts) == 0 {
-		return 0, fmt.Errorf("mimocode: no non-system messages")
-	}
-
-	providerID, modelID := client.ResolveModel(ctx, ra.internalRequest.Model)
-	actualModel := fmt.Sprintf("%s/%s", providerID, modelID)
-
-	prompt := miMoPrompt{
-		Model:  miMoModel{ProviderID: providerID, ModelID: modelID},
-		Parts:  parts,
-		System: systemMsg,
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("mimocode upstream %d: %s", resp.StatusCode, body)
 	}
 
-	if ra.internalRequest.Stream != nil && *ra.internalRequest.Stream {
-		// 流式：先连 SSE 再发 prompt，边收边转发
+	isStream := ra.internalRequest.Stream != nil && *ra.internalRequest.Stream
+
+	if isStream {
 		ra.c.Header("Content-Type", "text/event-stream")
 		ra.c.Header("Cache-Control", "no-cache")
 		ra.c.Header("Connection", "keep-alive")
-
-		streamer := client.StartStream(ctx, sessionID, 3*time.Minute, actualModel, ra.c.Writer)
-		time.Sleep(100 * time.Millisecond)
-
-		if err := client.SendPrompt(ctx, sessionID, prompt); err != nil {
-			return 0, fmt.Errorf("mimocode send prompt: %w", err)
-		}
-
-		content, reasoning, err := streamer.Wait()
-		respBody := BuildOpenAIResponse(actualModel, content, reasoning, nil)
-		ra.metrics.InternalResponse, _ = json.Marshal(respBody)
-		if err != nil {
-			return http.StatusOK, err
+		ra.c.Header("X-Accel-Buffering", "no")
+		buf := make([]byte, 32*1024)
+		for {
+			n, readErr := resp.Body.Read(buf)
+			if n > 0 {
+				ra.c.Writer.Write(buf[:n])
+				ra.c.Writer.Flush()
+			}
+			if readErr != nil {
+				break
+			}
 		}
 		return http.StatusOK, nil
 	}
 
-	// 非流式：先收集完整响应再返回
-	collector := client.StartCollect(ctx, sessionID, 3*time.Minute)
-	time.Sleep(100 * time.Millisecond)
-
-	if err := client.SendPrompt(ctx, sessionID, prompt); err != nil {
-		return 0, fmt.Errorf("mimocode send prompt: %w", err)
+	// 非流式：聚合 SSE chunks
+	chunks := miMoAggregateSSE(resp.Body)
+	if len(chunks) == 0 {
+		return http.StatusBadGateway, fmt.Errorf("mimocode: empty upstream response")
 	}
-
-	content, reasoning, err := collector.Wait()
-	if err != nil {
-		return 0, fmt.Errorf("mimocode collect response: %w", err)
-	}
-
-	resp := BuildOpenAIResponse(actualModel, content, reasoning, nil)
+	aggregated := miMoAggregateChunks(chunks, ra.internalRequest.Model)
 	ra.c.Header("Content-Type", "application/json")
-	ra.c.JSON(http.StatusOK, resp)
-	ra.metrics.InternalResponse, _ = json.Marshal(resp)
+	ra.c.JSON(http.StatusOK, aggregated)
+	ra.metrics.InternalResponse, _ = json.Marshal(aggregated)
 	return http.StatusOK, nil
 }
 
