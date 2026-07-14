@@ -56,10 +56,9 @@ func SyncModelsTask() {
 		}
 		deletedModels, addedModels := diff.Diff(oldModels, newModels)
 		if len(deletedModels) > 0 || len(addedModels) > 0 {
-			fetchModelStr := strings.Join(newModels, ",")
 			if _, err := op.ChannelUpdate(&model.ChannelUpdateRequest{
 				ID:    channel.ID,
-				Model: &fetchModelStr,
+				Model: new(strings.Join(newModels, ",")),
 			}, ctx); err != nil {
 				log.Errorf("failed to update channel %s: %v", channel.Name, err)
 				continue
