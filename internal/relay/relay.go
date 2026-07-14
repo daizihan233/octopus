@@ -509,29 +509,35 @@ func (in *parsedRequestInbound) TransformRequest(ctx context.Context, request *h
 }
 
 // forwardMiMoCode 直接调用 api.xiaomimimo.com 的 OpenAI 兼容接口。
+// 不经过 llm.Message 序列化，直接透传客户端原始 JSON body，只修改必要字段。
 func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	ctx := ra.c.Request.Context()
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 	jwtMgr := newMiMoJWTManager(ra.channel.GetBaseUrl(), httpClient)
 	sessionAffinity := fmt.Sprintf("ses_%x", time.Now().UnixMilli())
 
+	// 读取客户端原始请求 body，避免 llm.Message 序列化引入非标准字段
+	rawBody := ra.internalRequest.RawRequest.Body
+
+	var bodyMap map[string]any
+	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+		return 0, fmt.Errorf("unmarshal request body: %w", err)
+	}
+
+	// 强制流式 + usage
+	bodyMap["stream"] = true
+	bodyMap["stream_options"] = map[string]any{"include_usage": true}
+
+	// 删除上游不理解的字段
+	for _, key := range []string{"response_format"} {
+		delete(bodyMap, key)
+	}
+
 	// 注入 magic prefix 到 system message
-	messages := injectMiMoMagicPrefix(ra.internalRequest.Messages)
+	messages, _ := bodyMap["messages"].([]any)
+	bodyMap["messages"] = injectMiMoMagicPrefixRaw(messages)
 
-	reqBody := &miMoChatRequest{
-		Model:     ra.internalRequest.Model,
-		Messages:  messages,
-		Stream:    true,
-		MaxTokens: ra.internalRequest.MaxTokens,
-	}
-	if ra.internalRequest.Temperature != nil {
-		reqBody.Temperature = ra.internalRequest.Temperature
-	}
-	if ra.internalRequest.TopP != nil {
-		reqBody.TopP = ra.internalRequest.TopP
-	}
-
-	resp, err := miMoChat(ctx, jwtMgr, ra.channel.GetBaseUrl(), reqBody, sessionAffinity)
+	resp, err := miMoChatRaw(ctx, jwtMgr, ra.channel.GetBaseUrl(), bodyMap, sessionAffinity)
 	if err != nil {
 		return 0, fmt.Errorf("mimocode chat: %w", err)
 	}

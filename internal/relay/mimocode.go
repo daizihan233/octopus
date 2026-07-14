@@ -16,8 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/looplj/axonhub/llm"
 )
 
 const (
@@ -138,76 +136,34 @@ func miMoChatHeaders(jwt string, sessionAffinity string) http.Header {
 	}
 }
 
-// --- Magic prefix 注入 ---
+// --- Magic prefix 注入（操作原始 JSON）---
 
-func injectMiMoMagicPrefix(messages []llm.Message) []llm.Message {
+func injectMiMoMagicPrefixRaw(messages []any) []any {
 	if len(messages) == 0 {
-		return append(messages, llm.Message{Role: "system", Content: llm.MessageContent{Content: strPtr(miMoMagicPrefix)}})
+		return []any{map[string]any{"role": "system", "content": miMoMagicPrefix}}
 	}
-	if strings.ToLower(messages[0].Role) == "system" {
-		text := extractMessageText(messages[0].Content)
-		if !strings.HasPrefix(text, miMoMagicPrefix) {
-			prefixed := miMoMagicPrefix + "\n\n" + text
-			messages[0].Content = llm.MessageContent{Content: &prefixed}
-		}
-		return messages
+	first, ok := messages[0].(map[string]any)
+	if !ok {
+		return append([]any{map[string]any{"role": "system", "content": miMoMagicPrefix}}, messages...)
 	}
-	return append([]llm.Message{{Role: "system", Content: llm.MessageContent{Content: strPtr(miMoMagicPrefix)}}}, messages...)
+	if strings.ToLower(first["role"].(string)) != "system" {
+		return append([]any{map[string]any{"role": "system", "content": miMoMagicPrefix}}, messages...)
+	}
+	text, _ := first["content"].(string)
+	if !strings.HasPrefix(text, miMoMagicPrefix) {
+		first["content"] = miMoMagicPrefix + "\n\n" + text
+	}
+	return messages
 }
-
-func extractMessageText(content llm.MessageContent) string {
-	if content.Content != nil {
-		return *content.Content
-	}
-	var texts []string
-	for _, p := range content.MultipleContent {
-		if p.Type == "text" && p.Text != nil {
-			texts = append(texts, *p.Text)
-		}
-	}
-	return strings.Join(texts, "")
-}
-
-func strPtr(s string) *string { return &s }
 
 // --- 上游请求 ---
 
-type miMoChatRequest struct {
-	Model          string         `json:"model"`
-	Messages       []llm.Message  `json:"messages"`
-	Stream         bool           `json:"stream"`
-	StreamOptions  map[string]any `json:"stream_options,omitempty"`
-	MaxTokens      *int64         `json:"max_tokens,omitempty"`
-	Temperature    *float64       `json:"temperature,omitempty"`
-	TopP           *float64       `json:"top_p,omitempty"`
-	Tools          any            `json:"tools,omitempty"`
-	ToolChoice     any            `json:"tool_choice,omitempty"`
-	ResponseFormat any            `json:"response_format,omitempty"`
-}
-
-// normalizeMiMoRequest 删除上游不理解的字段，避免上游返回异常或忽略请求。
-func normalizeMiMoRequest(body *miMoChatRequest) map[string]any {
-	raw, _ := json.Marshal(body)
-	var m map[string]any
-	json.Unmarshal(raw, &m)
-
-	// 上游不支持的字段，参照 mimocode2api 的 normalize_request
-	for _, key := range []string{"response_format"} {
-		delete(m, key)
-	}
-	return m
-}
-
-func miMoChat(ctx context.Context, jwtMgr *miMoJWTManager, baseURL string, body *miMoChatRequest, sessionAffinity string) (*http.Response, error) {
+func miMoChatRaw(ctx context.Context, jwtMgr *miMoJWTManager, baseURL string, body map[string]any, sessionAffinity string) (*http.Response, error) {
 	jwt, err := jwtMgr.getJWT(ctx)
 	if err != nil {
 		return nil, err
 	}
-	body.Stream = true
-	if body.StreamOptions == nil {
-		body.StreamOptions = map[string]any{"include_usage": true}
-	}
-	payload, _ := json.Marshal(normalizeMiMoRequest(body))
+	payload, _ := json.Marshal(body)
 	url := strings.TrimRight(baseURL, "/") + miMoChatPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
