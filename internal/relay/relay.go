@@ -525,7 +525,7 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 	}
 
 	// 3. 解析 model（providerID/modelID）
-	providerID := "opencode"
+	providerID := "mimo"
 	modelID := ra.internalRequest.Model
 	if idx := strings.Index(modelID, "/"); idx > 0 {
 		providerID = modelID[:idx]
