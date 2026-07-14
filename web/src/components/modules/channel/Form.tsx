@@ -256,6 +256,7 @@ export function ChannelForm({
                             <SelectItem className='rounded-xl' value={String(ChannelType.Gemini)}>{t('typeGemini')}</SelectItem>
                             <SelectItem className='rounded-xl' value={String(ChannelType.Volcengine)}>{t('typeVolcengine')}</SelectItem>
                             <SelectItem className='rounded-xl' value={String(ChannelType.OpenAIEmbedding)}>{t('typeOpenAIEmbedding')}</SelectItem>
+                            <SelectItem className='rounded-xl' value={String(ChannelType.MiMoCode)}>{t('typeMiMoCode')}</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>
@@ -329,7 +330,7 @@ export function ChannelForm({
                                 value={k.channel_key}
                                 onChange={(e) => handleUpdateKey(idx, { channel_key: e.target.value })}
                                 placeholder={t('apiKey')}
-                                required={idx === 0}
+                                required={idx === 0 && formData.type !== ChannelType.MiMoCode}
                                 className="rounded-xl flex-1"
                             />
                             <Input

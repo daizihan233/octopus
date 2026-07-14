@@ -38,3 +38,9 @@ jobs:
           git push origin master --force
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Trigger release build
+        run: |
+          gh workflow run release.yaml --ref master
+        env:
+          GH_TOKEN: ${{secrets.GITHUB_TOKEN}}
