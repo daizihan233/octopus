@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -548,9 +549,13 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 		ra.c.Header("Cache-Control", "no-cache")
 		ra.c.Header("Connection", "keep-alive")
 		ra.c.Header("X-Accel-Buffering", "no")
+
+		// 流式同时写客户端和缓冲原始 SSE，流结束后聚合用于日志
+		var sseBuf bytes.Buffer
+		tee := io.TeeReader(resp.Body, &sseBuf)
 		buf := make([]byte, 32*1024)
 		for {
-			n, readErr := resp.Body.Read(buf)
+			n, readErr := tee.Read(buf)
 			if n > 0 {
 				ra.c.Writer.Write(buf[:n])
 				ra.c.Writer.Flush()
@@ -558,6 +563,12 @@ func (ra *relayAttempt) forwardMiMoCode() (int, error) {
 			if readErr != nil {
 				break
 			}
+		}
+		// 聚合 SSE 写入日志
+		chunks := miMoAggregateSSE(&sseBuf)
+		if len(chunks) > 0 {
+			aggregated := miMoAggregateChunks(chunks, ra.internalRequest.Model)
+			ra.metrics.InternalResponse, _ = json.Marshal(aggregated)
 		}
 		return http.StatusOK, nil
 	}
