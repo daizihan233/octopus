@@ -185,6 +185,19 @@ type miMoChatRequest struct {
 	ResponseFormat any            `json:"response_format,omitempty"`
 }
 
+// normalizeMiMoRequest 删除上游不理解的字段，避免上游返回异常或忽略请求。
+func normalizeMiMoRequest(body *miMoChatRequest) map[string]any {
+	raw, _ := json.Marshal(body)
+	var m map[string]any
+	json.Unmarshal(raw, &m)
+
+	// 上游不支持的字段，参照 mimocode2api 的 normalize_request
+	for _, key := range []string{"response_format"} {
+		delete(m, key)
+	}
+	return m
+}
+
 func miMoChat(ctx context.Context, jwtMgr *miMoJWTManager, baseURL string, body *miMoChatRequest, sessionAffinity string) (*http.Response, error) {
 	jwt, err := jwtMgr.getJWT(ctx)
 	if err != nil {
@@ -194,7 +207,7 @@ func miMoChat(ctx context.Context, jwtMgr *miMoJWTManager, baseURL string, body 
 	if body.StreamOptions == nil {
 		body.StreamOptions = map[string]any{"include_usage": true}
 	}
-	payload, _ := json.Marshal(body)
+	payload, _ := json.Marshal(normalizeMiMoRequest(body))
 	url := strings.TrimRight(baseURL, "/") + miMoChatPath
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
@@ -248,6 +261,7 @@ func miMoAggregateChunks(chunks []map[string]any, model string) map[string]any {
 	var content, reasoning strings.Builder
 	var finishReason string
 	var usage map[string]any
+	var toolCalls []map[string]any
 
 	for _, chunk := range chunks {
 		if m, ok := chunk["model"].(string); ok && m != "" {
@@ -267,6 +281,46 @@ func miMoAggregateChunks(chunks []map[string]any, model string) map[string]any {
 			if fr, ok := choice["finish_reason"].(string); ok && fr != "" {
 				finishReason = fr
 			}
+			// 聚合 tool_calls delta
+			if rawTC, ok := delta["tool_calls"].([]any); ok {
+				for _, tcRaw := range rawTC {
+					tc, ok := tcRaw.(map[string]any)
+					if !ok {
+						continue
+					}
+					idx := 0
+					if i, ok := tc["index"].(float64); ok {
+						idx = int(i)
+					}
+					// 扩展 tool_calls 切片以容纳此 index
+					for len(toolCalls) <= idx {
+						toolCalls = append(toolCalls, map[string]any{
+							"id":   "",
+							"type": "function",
+							"function": map[string]any{
+								"name":      "",
+								"arguments": "",
+							},
+						})
+					}
+					existing := toolCalls[idx]
+					if id, ok := tc["id"].(string); ok && id != "" {
+						existing["id"] = id
+					}
+					if tp, ok := tc["type"].(string); ok && tp != "" {
+						existing["type"] = tp
+					}
+					if funcObj, ok := tc["function"].(map[string]any); ok {
+						fn, _ := existing["function"].(map[string]any)
+						if name, ok := funcObj["name"].(string); ok && name != "" {
+							fn["name"] = name
+						}
+						if args, ok := funcObj["arguments"].(string); ok {
+							fn["arguments"] = fn["arguments"].(string) + args
+						}
+					}
+				}
+			}
 		}
 		if u, ok := chunk["usage"].(map[string]any); ok {
 			usage = u
@@ -276,6 +330,13 @@ func miMoAggregateChunks(chunks []map[string]any, model string) map[string]any {
 	msg := map[string]any{"role": "assistant", "content": content.String()}
 	if reasoning.Len() > 0 {
 		msg["reasoning_content"] = reasoning.String()
+	}
+	if len(toolCalls) > 0 {
+		msg["tool_calls"] = toolCalls
+		// 有 tool_calls 时，content 可能为 null
+		if content.Len() == 0 {
+			msg["content"] = nil
+		}
 	}
 	resp := map[string]any{
 		"id":      fmt.Sprintf("chatcmpl-%d", time.Now().UnixMilli()),
