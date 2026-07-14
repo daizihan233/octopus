@@ -25,7 +25,7 @@ type MiMoCodeClient struct {
 func NewMiMoCodeClient(baseURL, password string) *MiMoCodeClient {
 	authHeader := ""
 	if password != "" {
-		encoded := base64.StdEncoding.EncodeToString([]byte("opencode:" + password))
+		encoded := base64.StdEncoding.EncodeToString([]byte("mimocode:" + password))
 		authHeader = "Basic " + encoded
 	}
 	return &MiMoCodeClient{
