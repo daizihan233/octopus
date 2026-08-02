@@ -254,12 +254,26 @@ func (ra *relayAttempt) forward() (int, error) {
 	}
 
 	relayMiddleware := &relayPipelineMiddleware{attempt: ra}
+
+	pipelineOpts := []pipeline.Option{
+		pipeline.WithMiddlewares(stream.EnsureUsage(), relayMiddleware),
+		pipeline.WithEmptyResponseDetection(),
+	}
+	// 将分组的首 token 超时传入 pipeline，覆盖从 HTTP 请求发出到收到首个
+	// 事件的完整窗口（T0→T2），在 writeStream 定时器启动之前就能通过
+	// context 取消中断上游阻塞的 HTTP 连接。
+	if ra.group.FirstTokenTimeOut > 0 {
+		pipelineOpts = append(pipelineOpts, pipeline.WithResponseTimeouts(
+			time.Duration(ra.group.FirstTokenTimeOut)*time.Second, // 流式首事件超时
+			0, // 非流式超时：由 pipeline 默认处理，此处不覆盖
+		))
+	}
+
 	result, err := pipeline.NewFactory(httpclient.NewHttpClientWithClient(httpClient)).
 		Pipeline(
 			&parsedRequestInbound{Inbound: ra.inAdapter, request: ra.internalRequest},
 			ra.outAdapter,
-			pipeline.WithMiddlewares(stream.EnsureUsage(), relayMiddleware),
-			pipeline.WithEmptyResponseDetection(),
+			pipelineOpts...,
 		).
 		Process(ctx, ra.internalRequest.RawRequest)
 	if err != nil {
