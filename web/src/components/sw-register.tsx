@@ -1,13 +1,12 @@
-'use client';
-
 import { useEffect } from 'react';
 import { SW_MESSAGE_TYPE } from '@/lib/sw';
 
+// ServiceWorkerRegister 在生产环境注册并激活最新的 Service Worker。
 export function ServiceWorkerRegister() {
     useEffect(() => {
         if (typeof window === 'undefined') return;
         if (!('serviceWorker' in navigator)) return;
-        if (process.env.NODE_ENV !== 'production') return;
+        if (!import.meta.env.PROD) return;
 
         let hasRefreshed = false;
         const onControllerChange = () => {

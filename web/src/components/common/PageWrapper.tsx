@@ -1,5 +1,3 @@
-'use client';
-
 import { motion, AnimatePresence } from 'motion/react';
 import { ReactNode, isValidElement, Children } from 'react';
 import { EASING } from '@/lib/animations/fluid-transitions';

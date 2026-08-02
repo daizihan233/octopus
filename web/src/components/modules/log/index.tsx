@@ -1,10 +1,8 @@
-'use client';
-
 import { useCallback, useMemo } from 'react';
 import { useLogs } from '@/api/endpoints/log';
 import { LogCard } from './Item';
 import { Loader2 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { VirtualizedGrid } from '@/components/common/VirtualizedGrid';
 
 /**

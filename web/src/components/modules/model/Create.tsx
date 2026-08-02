@@ -1,5 +1,3 @@
-'use client';
-
 import { useState } from 'react';
 import { useCreateModel } from '@/api/endpoints/model';
 import { Input } from '@/components/ui/input';
@@ -11,7 +9,7 @@ import {
     MorphingDialogDescription,
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 
 export function CreateDialogContent() {
     const { setIsOpen } = useMorphingDialog();

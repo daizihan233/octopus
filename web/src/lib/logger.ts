@@ -3,7 +3,7 @@
  * 在生产环境中过滤敏感的日志输出
  */
 
-const isDevelopment = process.env.NODE_ENV !== 'production';
+const isDevelopment = import.meta.env.DEV; // 标记当前是否为 Vite 开发模式。
 
 export const logger = {
     /**

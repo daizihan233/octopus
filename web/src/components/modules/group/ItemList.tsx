@@ -1,5 +1,3 @@
-'use client';
-
 import { useEffect, useId, useRef, useState } from 'react';
 import { Layers, GripVertical, X, Trash2 } from 'lucide-react';
 import {
@@ -14,7 +12,7 @@ import { cn } from '@/lib/utils';
 import { getModelIcon } from '@/lib/model-icons';
 import type { LLMChannel } from '@/api/endpoints/model';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/animate-ui/components/animate/tooltip';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 
 export interface SelectedMember extends LLMChannel {
     id: string;

@@ -1,5 +1,3 @@
-'use client';
-
 import type { GroupItem } from '@/api/endpoints/group';
 import {
     MorphingDialogClose,
@@ -8,7 +6,7 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { useCreateGroup } from '@/api/endpoints/group';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { GroupEditor } from './Editor';
 import { toast } from '@/components/common/Toast';
 

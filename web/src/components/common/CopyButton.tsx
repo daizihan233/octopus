@@ -1,10 +1,8 @@
-'use client';
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { Check, Copy } from 'lucide-react';
 import { useCopyToClipboard } from '@uidotdev/usehooks';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { cn } from '@/lib/utils';
 import { toast } from '@/components/common/Toast';
 
@@ -77,5 +75,4 @@ export function CopyIconButton({
         </button>
     );
 }
-
 

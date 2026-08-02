@@ -1,7 +1,5 @@
-'use client';
-
 import { useMemo, useRef, useState } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { Database, Download, Upload } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -132,5 +130,4 @@ export function SettingBackup() {
         </div>
     );
 }
-
 

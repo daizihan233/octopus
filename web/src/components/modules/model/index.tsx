@@ -1,5 +1,3 @@
-'use client';
-
 import { useMemo } from 'react';
 import { useModelList } from '@/api/endpoints/model';
 import { ModelItem } from './Item';

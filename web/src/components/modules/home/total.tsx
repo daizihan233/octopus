@@ -1,5 +1,3 @@
-'use client';
-
 import { motion } from 'motion/react';
 import {
     Activity,
@@ -13,7 +11,7 @@ import {
     DollarSign,
     FastForward
 } from 'lucide-react';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { useStatsTotal } from '@/api/endpoints/stats';
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';
 import { EASING } from '@/lib/animations/fluid-transitions';

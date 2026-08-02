@@ -1,5 +1,3 @@
-'use client';
-
 import { useMemo } from 'react';
 import { GroupCard } from './Card';
 import { useGroupList } from '@/api/endpoints/group';

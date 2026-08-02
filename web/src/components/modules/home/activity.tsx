@@ -1,9 +1,7 @@
-'use client';
-
 import { useStatsDaily, type StatsDailyFormatted } from '@/api/endpoints/stats';
 import { useMemo, useRef, useLayoutEffect, useState, useCallback } from 'react';
 import { createPortal } from 'react-dom';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { Fragment } from 'react';
 import dayjs from 'dayjs';
 

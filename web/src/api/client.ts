@@ -1,7 +1,7 @@
 import type { ApiError } from './types';
 import { HttpStatus } from './types';
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || '.';
+export const API_BASE_URL = '.'; // API 请求固定使用当前站点，由 Vite 开发代理转发。
 
 /**
  * 获取认证 Store（延迟导入以避免循环依赖）
@@ -136,4 +136,3 @@ export const apiClient = {
     patch: <T>(path: string, data?: unknown, params?: Record<string, string | number | boolean>): Promise<T> =>
         request<T>('PATCH', path, data ? JSON.stringify(data) : undefined, params),
 };
-

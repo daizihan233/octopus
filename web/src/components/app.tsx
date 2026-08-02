@@ -1,6 +1,4 @@
 
-'use client';
-
 import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from "motion/react"
 import { useAuth } from '@/api/endpoints/user';
@@ -8,7 +6,7 @@ import { LoginForm } from '@/components/modules/login';
 import { APIKeyDashboard } from '@/components/modules/apikey-dashboard';
 import { ContentLoader } from '@/route/content-loader';
 import { NavBar, useNavStore } from '@/components/modules/navbar';
-import { useTranslations } from 'next-intl'
+import { useTranslations } from 'use-intl'
 import Logo, { LOGO_DRAW_END_MS } from '@/components/modules/logo';
 import { Toolbar } from '@/components/modules/toolbar';
 import { ENTRANCE_VARIANTS } from '@/lib/animations/fluid-transitions';

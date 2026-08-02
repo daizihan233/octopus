@@ -223,7 +223,7 @@ build_frontend() {
 
     # Build the project
     log_info "Building frontend project..."
-    if ! NEXT_PUBLIC_APP_VERSION="$GIT_VERSION" pnpm run build; then
+    if ! VITE_APP_VERSION="$GIT_VERSION" pnpm run build; then
         log_error "Failed to build frontend project"
         cd ..
         return 1
@@ -232,24 +232,6 @@ build_frontend() {
 
     # Return to original directory
     cd ..
-
-    # Move out directory to static directory
-    log_info "Moving frontend output to static directory..."
-    
-    # Remove old static/out if exists
-    if [ -d "static/out" ]; then
-        rm -rf "static/out"
-        log_info "Removed old static/out directory"
-    fi
-    
-    # Move web/out to static/out
-    if [ -d "${web_dir}/out" ]; then
-        mv "${web_dir}/out" "static/"
-        log_success "Moved frontend output to static/out"
-    else
-        log_error "Frontend output directory not found: ${web_dir}/out"
-        return 1
-    fi
 
     return 0
 }

@@ -6,7 +6,7 @@ import {
     useMorphingDialog,
 } from '@/components/ui/morphing-dialog';
 import { useCreateChannel, ChannelType, AutoGroupType } from '@/api/endpoints/channel';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { ChannelForm, type ChannelFormData } from './Form';
 
 export function CreateDialogContent() {

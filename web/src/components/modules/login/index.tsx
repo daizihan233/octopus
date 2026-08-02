@@ -1,8 +1,6 @@
-'use client';
-
 import { useState } from "react"
 import { motion } from "motion/react"
-import { useTranslations } from 'next-intl'
+import { useTranslations } from 'use-intl'
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"

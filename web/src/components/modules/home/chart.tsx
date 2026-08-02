@@ -1,10 +1,8 @@
-'use client';
-
 import { useStatsDaily, useStatsHourly } from '@/api/endpoints/stats';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { useMemo } from 'react';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from 'recharts';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { formatCount, formatMoney } from '@/lib/utils';
 import dayjs from 'dayjs';
 import { AnimatedNumber } from '@/components/common/AnimatedNumber';

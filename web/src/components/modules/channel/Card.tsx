@@ -8,7 +8,7 @@ import { CheckCircle2, DollarSign, Key, Layers, MessageSquare, XCircle } from 'l
 import { type StatsMetricsFormatted } from '@/api/endpoints/stats';
 import { type Channel, useEnableChannel } from '@/api/endpoints/channel';
 import { CardContent } from './CardContent';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/animate-ui/components/animate/tooltip';
 import { Switch } from '@/components/ui/switch';
 import { toast } from '@/components/common/Toast';

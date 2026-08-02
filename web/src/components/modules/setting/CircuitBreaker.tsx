@@ -1,7 +1,5 @@
-'use client';
-
 import { useEffect, useState, useRef } from 'react';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { Zap, Hash, Timer, TimerOff, HelpCircle } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { useSettingList, useSetSetting, SettingKey } from '@/api/endpoints/setting';

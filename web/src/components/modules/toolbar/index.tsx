@@ -1,5 +1,3 @@
-'use client';
-
 import { useState } from 'react';
 import { ArrowUpAZ, Clock3, LayoutGrid, List, Plus, Search, SlidersHorizontal, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -16,7 +14,7 @@ import { useNavStore, type NavItem } from '@/components/modules/navbar';
 import { CreateDialogContent as ChannelCreateContent } from '@/components/modules/channel/Create';
 import { CreateDialogContent as GroupCreateContent } from '@/components/modules/group/Create';
 import { CreateDialogContent as ModelCreateContent } from '@/components/modules/model/Create';
-import { useTranslations } from 'next-intl';
+import { useTranslations } from 'use-intl';
 import { useSearchStore } from './search-store';
 import {
     useToolbarViewOptionsStore,

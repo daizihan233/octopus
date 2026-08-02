@@ -1,5 +1,3 @@
-'use client';
-
 import { useMemo } from 'react';
 import { useChannelList } from '@/api/endpoints/channel';
 import { Card } from './Card';

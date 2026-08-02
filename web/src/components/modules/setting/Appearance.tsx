@@ -1,7 +1,5 @@
-'use client';
-
-import { useTheme } from 'next-themes';
-import { useTranslations } from 'next-intl';
+import { useTheme } from '@/provider/theme';
+import { useTranslations } from 'use-intl';
 import { Sun, Moon, Monitor, Languages } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSettingStore, type Locale } from '@/stores/setting';
@@ -65,4 +63,3 @@ export function SettingAppearance() {
         </div>
     );
 }
-

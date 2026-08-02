@@ -1,5 +1,3 @@
-'use client';
-
 import { CONTENT_MAP } from './config';
 
 export function ContentLoader({ activeRoute }: { activeRoute: string }) {

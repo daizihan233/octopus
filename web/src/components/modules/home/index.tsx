@@ -1,5 +1,3 @@
-'use client';
-
 import { Activity } from './activity';
 import { Total } from './total';
 import { StatsChart } from './chart';

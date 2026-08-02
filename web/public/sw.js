@@ -1,5 +1,5 @@
 // Service Worker for Octopus PWA
-// Next.js: hashed assets under /_next/static/ are immutable (Cache First)
+// Vite: hashed assets under /assets/ are immutable (Cache First)
 
 /**
  * Cache naming
@@ -62,8 +62,12 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // 跳过 API 请求和开发环境 HMR
-    if (url.pathname.startsWith('/api/') || url.pathname.includes('webpack-hmr')) {
+    // 跳过 API 请求和 Vite 开发环境资源
+    if (
+        url.pathname.startsWith('/api/') ||
+        url.pathname.startsWith('/@vite') ||
+        url.pathname.startsWith('/@react-refresh')
+    ) {
         return;
     }
 
@@ -73,15 +77,9 @@ self.addEventListener('fetch', (event) => {
         return;
     }
 
-    // /_next/static/ 资源：Cache First（带哈希，永不变）
-    if (url.pathname.startsWith('/_next/static/')) {
+    // /assets/ 资源：Cache First（带哈希，永不变）
+    if (url.pathname.startsWith('/assets/')) {
         event.respondWith(cacheFirst(request, CACHE_NAMES.static));
-        return;
-    }
-
-    // /_next/data/ (预取数据)：Network First
-    if (url.pathname.startsWith('/_next/data/')) {
-        event.respondWith(networkFirst(request, CACHE_NAMES.app));
         return;
     }
 
