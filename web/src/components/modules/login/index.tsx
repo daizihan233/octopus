@@ -105,7 +105,9 @@ export function LoginForm({ onLoginSuccess }: { onLoginSuccess?: () => void }) {
                   <FieldLabel htmlFor="username">{t('username')}</FieldLabel>
                   <Input
                     id="username"
+                    name="username"
                     type="text"
+                    autoComplete="username"
                     placeholder={t('usernamePlaceholder')}
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
@@ -117,7 +119,9 @@ export function LoginForm({ onLoginSuccess }: { onLoginSuccess?: () => void }) {
                   <FieldLabel htmlFor="password">{t('password')}</FieldLabel>
                   <Input
                     id="password"
+                    name="password"
                     type="password"
+                    autoComplete="current-password"
                     placeholder={t('passwordPlaceholder')}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
@@ -131,7 +135,9 @@ export function LoginForm({ onLoginSuccess }: { onLoginSuccess?: () => void }) {
                   <FieldLabel htmlFor="apikey">{t('apikey')}</FieldLabel>
                   <Input
                     id="apikey"
+                    name="apikey"
                     type="password"
+                    autoComplete="off"
                     placeholder={t('apikeyPlaceholder')}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
