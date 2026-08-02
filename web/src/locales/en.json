@@ -533,6 +533,7 @@
             "typeAnthropic": "Anthropic",
             "typeGemini": "Gemini",
             "typeVolcengine": "Volcengine",
+            "typeMiMoCode": "MiMoCode",
             "autoSync": "Auto Sync",
             "autoGroup": "Auto Group",
             "autoGroupNone": "None",

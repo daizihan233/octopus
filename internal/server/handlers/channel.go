@@ -64,8 +64,7 @@ func listChannel(c *gin.Context) {
 		return
 	}
 	for i, channel := range channels {
-		stats := op.StatsChannelGet(channel.ID)
-		channels[i].Stats = &stats
+		channels[i].Stats = new(op.StatsChannelGet(channel.ID))
 	}
 	resp.Success(c, channels)
 }
@@ -80,14 +79,17 @@ func createChannel(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	stats := op.StatsChannelGet(channel.ID)
-	channel.Stats = &stats
+	channel.Stats = new(op.StatsChannelGet(channel.ID))
 	go func(channel *model.Channel) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		modelStr := channel.Model + "," + channel.CustomModel
 		modelArray := strings.Split(modelStr, ",")
-		helper.LLMPriceAddToDB(modelArray, ctx)
+		err := helper.LLMPriceAddToDB(modelArray, ctx)
+		if err != nil {
+			resp.Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
 		helper.ChannelBaseUrlDelayUpdate(channel, ctx)
 		helper.ChannelAutoGroup(channel, ctx)
 	}(&channel)
@@ -105,14 +107,17 @@ func updateChannel(c *gin.Context) {
 		resp.Error(c, http.StatusInternalServerError, err.Error())
 		return
 	}
-	stats := op.StatsChannelGet(channel.ID)
-	channel.Stats = &stats
+	channel.Stats = new(op.StatsChannelGet(channel.ID))
 	go func(channel *model.Channel) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 		modelStr := channel.Model + "," + channel.CustomModel
 		modelArray := strings.Split(modelStr, ",")
-		helper.LLMPriceAddToDB(modelArray, ctx)
+		err := helper.LLMPriceAddToDB(modelArray, ctx)
+		if err != nil {
+			resp.Error(c, http.StatusInternalServerError, err.Error())
+			return
+		}
 		helper.ChannelBaseUrlDelayUpdate(channel, ctx)
 		helper.ChannelAutoGroup(channel, ctx)
 	}(channel)
@@ -168,6 +173,6 @@ func syncChannel(c *gin.Context) {
 }
 
 func getLastSyncTime(c *gin.Context) {
-	time := task.GetLastSyncModelsTime()
-	resp.Success(c, time)
+	lastSyncModelsTime := task.GetLastSyncModelsTime()
+	resp.Success(c, lastSyncModelsTime)
 }

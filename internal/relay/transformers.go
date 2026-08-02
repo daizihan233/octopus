@@ -53,6 +53,8 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 			return gemini.NewOutboundTransformer(baseURL, key)
 		case dbmodel.ChannelTypeDoubao:
 			return doubao.NewOutboundTransformer(baseURL, key)
+		case dbmodel.ChannelTypeMiMoCode:
+			return nil, nil
 		default:
 			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
 		}
@@ -68,6 +70,8 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 			return gemini.NewOutboundTransformer(baseURL, key)
 		case dbmodel.ChannelTypeDoubao:
 			return doubao.NewOutboundTransformer(baseURL, key)
+		case dbmodel.ChannelTypeMiMoCode:
+			return nil, nil
 		default:
 			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
 		}
@@ -83,6 +87,8 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 			return gemini.NewOutboundTransformer(baseURL, key)
 		case dbmodel.ChannelTypeDoubao:
 			return doubao.NewOutboundTransformer(baseURL, key)
+		case dbmodel.ChannelTypeMiMoCode:
+			return nil, nil
 		default:
 			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
 		}

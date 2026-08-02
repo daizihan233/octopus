@@ -32,12 +32,52 @@ type RelayMetrics struct {
 
 	// 参数覆盖
 	ParamOverride string
+
+	// 存储原始 usage，用于 auto 路由时修正模型后重算费用
+	lastUsage *llm.Usage
+}
+
+func (m *RelayMetrics) applyActualModel() {
+	if len(m.InternalResponse) == 0 {
+		return
+	}
+	var resp struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(m.InternalResponse, &resp); err != nil || resp.Model == "" {
+		return
+	}
+	oldModel := m.ActualModel
+	m.ActualModel = resp.Model
+	if oldModel != resp.Model && m.lastUsage != nil {
+		m.recalcCost(m.lastUsage)
+	}
+}
+
+func (m *RelayMetrics) recalcCost(usage *llm.Usage) {
+	modelPrice := price.GetLLMPrice(m.ActualModel)
+	if modelPrice == nil {
+		return
+	}
+	tokenDetails := usage.PromptTokensDetails
+	if tokenDetails == nil {
+		tokenDetails = &llm.PromptTokensDetails{}
+	}
+	nonCachedTokens := usage.PromptTokens - tokenDetails.CachedTokens - tokenDetails.WriteCachedTokens
+	if nonCachedTokens < 0 {
+		nonCachedTokens = usage.PromptTokens
+	}
+	m.Stats.InputCost = (float64(tokenDetails.CachedTokens)*modelPrice.CacheRead +
+		float64(tokenDetails.WriteCachedTokens)*modelPrice.CacheWrite +
+		float64(nonCachedTokens)*modelPrice.Input) * 1e-6
+	m.Stats.OutputCost = float64(usage.CompletionTokens) * modelPrice.Output * 1e-6
 }
 
 func (m *RelayMetrics) RecordUsage(usage *llm.Usage) {
 	if usage == nil {
 		return
 	}
+	m.lastUsage = usage
 
 	// usage 已由 axonhub/llm 标准化；octopus 仍使用本地模型价格表计算成本，所以这里只做用量落点和价格换算。
 	m.Stats.InputToken = usage.PromptTokens
@@ -63,6 +103,8 @@ func (m *RelayMetrics) RecordUsage(usage *llm.Usage) {
 }
 
 func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attempts []model.ChannelAttempt) {
+	// 以响应中的实际 model 为准（部分提供商支持 auto 智能路由）
+	m.applyActualModel()
 	duration := time.Since(m.StartTime)
 
 	globalStats := model.StatsMetrics{

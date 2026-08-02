@@ -1,5 +1,6 @@
 data
 build
+tmp
 static/out/*
 !static/out/README.md
 .vscode

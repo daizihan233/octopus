@@ -1,10 +1,12 @@
 package relay
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"net/http"
 	"slices"
@@ -235,6 +237,11 @@ func parseRequest(c *gin.Context, inboundType llm.APIFormat, inAdapter transform
 
 // forward 转发请求到上游服务
 func (ra *relayAttempt) forward() (int, error) {
+	// MiMoCode: 绕过 axonhub pipeline，直接走 opencode 协议
+	if ra.outAdapter == nil && ra.channel.Type == dbmodel.ChannelTypeMiMoCode {
+		return ra.forwardMiMoCode()
+	}
+
 	ctx := ra.c.Request.Context()
 	if ra.internalRequest.RawRequest == nil {
 		return 0, fmt.Errorf("missing raw request")
@@ -499,4 +506,178 @@ func (in *parsedRequestInbound) TransformRequest(ctx context.Context, request *h
 	// relay 已经为选路解析过请求；pipeline 入口复用该结果，避免每次通道尝试再次解析同一份 body。
 	in.request.RawRequest = request
 	return in.request, nil
+}
+
+// forwardMiMoCode 直接调用 api.xiaomimimo.com 的 OpenAI 兼容接口。
+// 不经过 llm.Message 序列化，直接透传客户端原始 JSON body，只修改必要字段。
+// HTTP 客户端与其它渠道一致（无固定总超时）；首 token 超时跟随分组 first_token_time_out。
+func (ra *relayAttempt) forwardMiMoCode() (int, error) {
+	ctx := ra.c.Request.Context()
+	httpClient, err := helper.ChannelHttpClient(ra.channel)
+	if err != nil {
+		return 0, fmt.Errorf("mimocode http client: %w", err)
+	}
+	jwtMgr := newMiMoJWTManager(ra.channel.GetBaseUrl(), httpClient)
+	sessionAffinity := fmt.Sprintf("ses_%x", time.Now().UnixMilli())
+
+	// 读取客户端原始请求 body，避免 llm.Message 序列化引入非标准字段
+	rawBody := ra.internalRequest.RawRequest.Body
+
+	var bodyMap map[string]any
+	if err := json.Unmarshal(rawBody, &bodyMap); err != nil {
+		return 0, fmt.Errorf("unmarshal request body: %w", err)
+	}
+
+	// 强制流式 + usage
+	bodyMap["stream"] = true
+	bodyMap["stream_options"] = map[string]any{"include_usage": true}
+	// 用 relay 选路后的实际模型名覆盖客户端传的名称
+	bodyMap["model"] = ra.internalRequest.Model
+
+	// 删除上游不理解的字段
+	for _, key := range []string{"response_format"} {
+		delete(bodyMap, key)
+	}
+
+	// 注入 magic prefix 到 system message
+	messages, _ := bodyMap["messages"].([]any)
+	bodyMap["messages"] = injectMiMoMagicPrefixRaw(messages)
+
+	resp, err := miMoChatRaw(ctx, jwtMgr, ra.channel.GetBaseUrl(), bodyMap, sessionAffinity)
+	if err != nil {
+		return 0, fmt.Errorf("mimocode chat: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("mimocode upstream %d: %s", resp.StatusCode, body)
+	}
+
+	isStream := ra.internalRequest.Stream != nil && *ra.internalRequest.Stream
+
+	if isStream {
+		ra.c.Header("Content-Type", "text/event-stream")
+		ra.c.Header("Cache-Control", "no-cache")
+		ra.c.Header("Connection", "keep-alive")
+		ra.c.Header("X-Accel-Buffering", "no")
+
+		// 流式同时写客户端和缓冲原始 SSE，流结束后聚合用于日志
+		var sseBuf bytes.Buffer
+		tee := io.TeeReader(resp.Body, &sseBuf)
+		if err := ra.miMoCopyUpstream(ctx, tee, true); err != nil {
+			return http.StatusOK, err
+		}
+		chunks := miMoAggregateSSE(&sseBuf)
+		if len(chunks) > 0 {
+			aggregated := miMoAggregateChunks(chunks, ra.internalRequest.Model)
+			ra.metrics.InternalResponse, _ = json.Marshal(aggregated)
+		}
+		return http.StatusOK, nil
+	}
+
+	// 非流式：上游仍是 SSE，先按首 token 超时读完再聚合
+	var sseBuf bytes.Buffer
+	if err := ra.miMoCopyUpstream(ctx, io.TeeReader(resp.Body, &sseBuf), false); err != nil {
+		return 0, err
+	}
+	chunks := miMoAggregateSSE(&sseBuf)
+	if len(chunks) == 0 {
+		return http.StatusBadGateway, fmt.Errorf("mimocode: empty upstream response")
+	}
+	aggregated := miMoAggregateChunks(chunks, ra.internalRequest.Model)
+	ra.c.Header("Content-Type", "application/json")
+	ra.c.JSON(http.StatusOK, aggregated)
+	ra.metrics.InternalResponse, _ = json.Marshal(aggregated)
+	return http.StatusOK, nil
+}
+
+// miMoCopyUpstream 从上游读 SSE。toClient=true 时边读边写客户端；false 时只消费 body（非流式聚合用）。
+// 首 token 超时与 writeStream 相同，取分组 first_token_time_out（秒，0 关闭）。
+func (ra *relayAttempt) miMoCopyUpstream(ctx context.Context, src io.Reader, toClient bool) error {
+	firstTokenTimeoutSec := ra.group.FirstTokenTimeOut
+	var firstTokenTimer *time.Timer
+	var firstTokenC <-chan time.Time
+	if firstTokenTimeoutSec > 0 {
+		firstTokenTimer = time.NewTimer(time.Duration(firstTokenTimeoutSec) * time.Second)
+		firstTokenC = firstTokenTimer.C
+		defer func() {
+			if firstTokenTimer != nil {
+				firstTokenTimer.Stop()
+			}
+		}()
+	}
+
+	type readResult struct {
+		n   int
+		err error
+	}
+	buf := make([]byte, 32*1024)
+	firstToken := true
+
+	for {
+		ch := make(chan readResult, 1)
+		go func() {
+			n, err := src.Read(buf)
+			ch <- readResult{n: n, err: err}
+		}()
+
+		var r readResult
+		if firstToken && firstTokenC != nil {
+			select {
+			case <-ctx.Done():
+				log.Infof("client disconnected, stopping mimocode stream")
+				return nil
+			case <-firstTokenC:
+				log.Warnf("first token timeout (%ds), switching channel", firstTokenTimeoutSec)
+				return fmt.Errorf("first token timeout (%ds)", firstTokenTimeoutSec)
+			case r = <-ch:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				log.Infof("client disconnected, stopping mimocode stream")
+				return nil
+			case r = <-ch:
+			}
+		}
+
+		if r.n > 0 {
+			if firstToken {
+				ra.metrics.FirstTokenTime = time.Now()
+				firstToken = false
+				if firstTokenTimer != nil {
+					if !firstTokenTimer.Stop() {
+						select {
+						case <-firstTokenTimer.C:
+						default:
+						}
+					}
+					firstTokenTimer = nil
+					firstTokenC = nil
+				}
+			}
+			if toClient {
+				if _, werr := ra.c.Writer.Write(buf[:r.n]); werr != nil {
+					return werr
+				}
+				ra.c.Writer.Flush()
+			}
+		}
+		if r.err != nil {
+			if r.err == io.EOF {
+				return nil
+			}
+			// 客户端断开时 Read 常伴随 cancel 错误，与 writeStream 一致不当作渠道失败
+			if ctx.Err() != nil {
+				return nil
+			}
+			return r.err
+		}
+	}
+}
+
+func mustJSON(v interface{}) string {
+	b, _ := json.Marshal(v)
+	return string(b)
 }

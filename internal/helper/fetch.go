@@ -1,9 +1,15 @@
 package helper
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"os/user"
+	"runtime"
 	"strings"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -23,6 +29,8 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 		fetchModel, err = fetchAnthropicModels(client, ctx, request)
 	case llm.APIFormatGeminiContents:
 		fetchModel, err = fetchGeminiModels(client, ctx, request)
+	case model.ChannelTypeMiMoCode:
+		fetchModel, err = fetchMiMoCodeModels(client, ctx, request)
 	default:
 		fetchModel, err = fetchOpenAIModels(client, ctx, request)
 	}
@@ -195,4 +203,66 @@ func applyCustomHeaders(req *http.Request, channel model.Channel) {
 			req.Header.Set(header.HeaderKey, header.HeaderValue)
 		}
 	}
+}
+
+func fetchMiMoCodeModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
+	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
+	jwt, err := fetchMiMoJWT(ctx, client, baseURL)
+	if err != nil {
+		return nil, err
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/api/free-ai/openai/models", nil)
+	req.Header.Set("Authorization", "Bearer "+jwt)
+	req.Header.Set("User-Agent", "mimocode/0.1.0")
+	req.Header.Set("X-Mimo-Source", "mimocode-cli-free")
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mimocode models %d", resp.StatusCode)
+	}
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	models := make([]string, 0, len(result.Data))
+	for _, m := range result.Data {
+		models = append(models, m.ID)
+	}
+	return models, nil
+}
+
+func fetchMiMoJWT(ctx context.Context, client *http.Client, baseURL string) (string, error) {
+	hostname, _ := os.Hostname()
+	username := ""
+	if u, err := user.Current(); err == nil {
+		username = u.Username
+	}
+	payload := strings.Join([]string{hostname, runtime.GOOS, runtime.GOARCH, runtime.GOARCH, username}, "|")
+	clientID := fmt.Sprintf("%x", sha256.Sum256([]byte(payload)))
+	body, _ := json.Marshal(map[string]string{"client": clientID})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/api/free-ai/bootstrap", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("User-Agent", "mimocode/0.1.0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bootstrap %d", resp.StatusCode)
+	}
+	var data struct {
+		JWT string `json:"jwt"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+	return data.JWT, nil
 }
