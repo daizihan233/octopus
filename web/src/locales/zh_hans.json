@@ -213,6 +213,10 @@
             "loadFailed": "加载失败",
             "form": {
                 "name": "名称",
+                "apiKey": "API Key",
+                "apiKeyPlaceholderCreate": "留空则自动生成",
+                "apiKeyPlaceholderEdit": "留空则保持不变",
+                "regenerate": "重新生成",
                 "maxCost": "最大金额",
                 "maxCostPlaceholder": "请输入金额",
                 "unlimited": "无限制",
@@ -243,7 +247,8 @@
                 "updateSuccess": "API 密钥更新成功",
                 "updateError": "API 密钥更新失败",
                 "deleteSuccess": "API 密钥删除成功",
-                "deleteError": "API 密钥删除失败"
+                "deleteError": "API 密钥删除失败",
+                "regenerateError": "重新生成失败"
             }
         },
         "llmPrice": {

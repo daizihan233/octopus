@@ -19,7 +19,7 @@ var db *gorm.DB
 
 func InitDB(dbType, dsn string, debug bool) error {
 	var err error
-	gormConfig := gorm.Config{Logger: logger.Discard}
+	gormConfig := gorm.Config{Logger: logger.Discard, TranslateError: true}
 	if debug {
 		gormConfig.Logger = logger.Default.LogMode(logger.Info)
 	}

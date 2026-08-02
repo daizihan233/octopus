@@ -82,9 +82,9 @@ export function useAPIKeyDashboardStats() {
 }
 
 /**
- * 创建 API Key 请求
+ * 创建 API Key 请求（api_key 可选：不传则后端自动生成）
  */
-export type CreateAPIKeyRequest = Omit<APIKey, 'id' | 'api_key'> & { enabled?: boolean };
+export type CreateAPIKeyRequest = Omit<APIKey, 'id' | 'api_key'> & { api_key?: string; enabled?: boolean };
 
 /**
  * 更新 API Key 请求
@@ -109,6 +109,22 @@ export function useAPIKeyList() {
             return apiClient.get<APIKey[]>('/api/v1/apikey/list');
         },
         refetchInterval: 30000,
+    });
+}
+
+/**
+ * 生成随机 API Key Hook（不落库，供「重新生成」按钮使用）
+ *
+ * @example
+ * const generateAPIKey = useGenerateAPIKey();
+ * generateAPIKey.mutate(undefined, { onSuccess: (key) => ... });
+ */
+export function useGenerateAPIKey() {
+    return useMutation({
+        mutationFn: async () => {
+            const res = await apiClient.get<{ api_key: string }>('/api/v1/apikey/generate');
+            return res.api_key;
+        },
     });
 }
 

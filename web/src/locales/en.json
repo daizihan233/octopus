@@ -213,6 +213,10 @@
             "loadFailed": "Failed to load",
             "form": {
                 "name": "Name",
+                "apiKey": "API Key",
+                "apiKeyPlaceholderCreate": "Leave empty to auto-generate",
+                "apiKeyPlaceholderEdit": "Leave empty to keep unchanged",
+                "regenerate": "Regenerate",
                 "maxCost": "Max Cost",
                 "maxCostPlaceholder": "Enter amount",
                 "unlimited": "Unlimited",
@@ -243,7 +247,8 @@
                 "updateSuccess": "API key updated",
                 "updateError": "Failed to update API key",
                 "deleteSuccess": "API key deleted",
-                "deleteError": "Failed to delete API key"
+                "deleteError": "Failed to delete API key",
+                "regenerateError": "Failed to regenerate API key"
             }
         },
         "llmPrice": {

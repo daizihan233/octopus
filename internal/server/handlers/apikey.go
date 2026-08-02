@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -34,6 +35,10 @@ func init() {
 		AddRoute(
 			router.NewRoute("/delete/:id", http.MethodDelete).
 				Handle(deleteAPIKey),
+		).
+		AddRoute(
+			router.NewRoute("/generate", http.MethodGet).
+				Handle(generateAPIKey),
 		)
 	router.NewGroupRouter("/api/v1/apikey").
 		Use(middleware.APIKeyAuth()).
@@ -53,9 +58,13 @@ func createAPIKey(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
-	req.APIKey = auth.GenerateAPIKey()
+	req.APIKey = strings.TrimSpace(req.APIKey)
+	if req.APIKey == "" {
+		// 未自定义时自动生成
+		req.APIKey = auth.GenerateAPIKey()
+	}
 	if err := op.APIKeyCreate(&req, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		respAPIKeyError(c, err)
 		return
 	}
 	resp.Success(c, req)
@@ -76,8 +85,9 @@ func updateAPIKey(c *gin.Context) {
 		resp.Error(c, http.StatusBadRequest, resp.ErrInvalidJSON)
 		return
 	}
+	req.APIKey = strings.TrimSpace(req.APIKey)
 	if err := op.APIKeyUpdate(&req, c.Request.Context()); err != nil {
-		resp.Error(c, http.StatusInternalServerError, err.Error())
+		respAPIKeyError(c, err)
 		return
 	}
 	resp.Success(c, req)
@@ -95,6 +105,23 @@ func deleteAPIKey(c *gin.Context) {
 		return
 	}
 	resp.Success(c, nil)
+}
+
+// respAPIKeyError 将 op 层的 API Key 错误映射为合适的 HTTP 状态码
+func respAPIKeyError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, op.ErrAPIKeyExists):
+		resp.Error(c, http.StatusConflict, err.Error())
+	case errors.Is(err, op.ErrAPIKeyEmpty), errors.Is(err, op.ErrAPIKeyTooShort), errors.Is(err, op.ErrAPIKeyTooLong):
+		resp.Error(c, http.StatusBadRequest, err.Error())
+	default:
+		resp.Error(c, http.StatusInternalServerError, err.Error())
+	}
+}
+
+// generateAPIKey 生成一个随机的 API Key（不落库，仅供前端「重新生成」使用）
+func generateAPIKey(c *gin.Context) {
+	resp.Success(c, map[string]string{"api_key": auth.GenerateAPIKey()})
 }
 
 func getStatsAPIKeyById(c *gin.Context) {

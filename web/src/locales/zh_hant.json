@@ -213,6 +213,10 @@
             "loadFailed": "載入失敗",
             "form": {
                 "name": "名稱",
+                "apiKey": "API Key",
+                "apiKeyPlaceholderCreate": "留空則自動產生",
+                "apiKeyPlaceholderEdit": "留空則保持不變",
+                "regenerate": "重新產生",
                 "maxCost": "最大金額",
                 "maxCostPlaceholder": "請輸入金額",
                 "unlimited": "無限制",
@@ -243,7 +247,8 @@
                 "updateSuccess": "API 金鑰更新成功",
                 "updateError": "API 金鑰更新失敗",
                 "deleteSuccess": "API 金鑰刪除成功",
-                "deleteError": "API 金鑰刪除失敗"
+                "deleteError": "API 金鑰刪除失敗",
+                "regenerateError": "重新產生失敗"
             }
         },
         "llmPrice": {

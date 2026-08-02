@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useId, useMemo, useState } from 'react';
 import { useTranslations } from 'use-intl';
-import { KeyRound, Plus, Loader, Trash2, Check, X, Info, CalendarDays, Pencil, Maximize2 } from 'lucide-react';
+import { KeyRound, Plus, Loader, Trash2, Check, X, Info, CalendarDays, Pencil, Maximize2, RefreshCw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Input } from '@/components/ui/input';
 import { Calendar } from '@/components/ui/calendar';
@@ -19,7 +19,9 @@ import {
     useCreateAPIKey,
     useUpdateAPIKey,
     useDeleteAPIKey,
+    useGenerateAPIKey,
     type APIKey,
+    type CreateAPIKeyRequest,
 } from '@/api/endpoints/apikey';
 import { useGroupList } from '@/api/endpoints/group';
 import { useStatsAPIKey } from '@/api/endpoints/stats';
@@ -73,7 +75,7 @@ interface APIKeyFormProps {
     apiKey?: APIKey;
     isPending: boolean;
     submitLabel: string;
-    onSubmit: (data: Omit<APIKey, 'id' | 'api_key'>) => void;
+    onSubmit: (data: CreateAPIKeyRequest) => void;
     onClose: () => void;
 }
 
@@ -81,8 +83,9 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
     const t = useTranslations('setting');
     const { data: groups = [] } = useGroupList();
 
-    const [form, setForm] = useState<Omit<APIKey, 'id' | 'api_key'>>(() => ({
+    const [form, setForm] = useState<CreateAPIKeyRequest>(() => ({
         name: apiKey?.name ?? '',
+        api_key: apiKey?.api_key ?? '',
         enabled: apiKey?.enabled ?? true,
         expire_at: apiKey?.expire_at,
         max_cost: apiKey?.max_cost,
@@ -117,7 +120,7 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
             ? expireDate.toLocaleDateString()
             : t('apiKey.form.selectDate');
 
-    const updateForm = useCallback((updater: Partial<Omit<APIKey, 'id' | 'api_key'>>) => {
+    const updateForm = useCallback((updater: Partial<CreateAPIKeyRequest>) => {
         setForm((prev) => ({ ...prev, ...updater }));
     }, []);
 
@@ -158,10 +161,25 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
         updateForm({ max_cost: undefined });
     }, [updateForm]);
 
+    const generateAPIKey = useGenerateAPIKey();
+    const isRegenerating = generateAPIKey.isPending;
+
+    const handleRegenerate = useCallback(() => {
+        generateAPIKey.mutate(undefined, {
+            onSuccess: (key) => updateForm({ api_key: key }),
+            onError: (error) => {
+                const msg = (error as unknown as ApiError)?.message;
+                toast.error(t('apiKey.toast.regenerateError'), { description: msg });
+            },
+        });
+    }, [generateAPIKey, updateForm, t]);
+
     const handleSubmit = useCallback((e: React.FormEvent) => {
         e.preventDefault();
         if (!form.name.trim()) return;
-        onSubmit(form);
+        const payload: CreateAPIKeyRequest = { ...form };
+        if (!payload.api_key?.trim()) delete payload.api_key;
+        onSubmit(payload);
     }, [form, onSubmit]);
 
     return (
@@ -176,6 +194,33 @@ function APIKeyForm({ apiKey, isPending, submitLabel, onSubmit, onClose }: APIKe
                     disabled={isPending}
                     required
                 />
+            </label>
+
+            <label className="grid gap-1 text-xs text-muted-foreground">
+                {t('apiKey.form.apiKey')}
+                <div className="flex items-center gap-2">
+                    <Input
+                        type="text"
+                        value={form.api_key ?? ''}
+                        onChange={(e) => updateForm({ api_key: e.target.value })}
+                        placeholder={apiKey ? t('apiKey.form.apiKeyPlaceholderEdit') : t('apiKey.form.apiKeyPlaceholderCreate')}
+                        className="h-9 text-sm rounded-xl font-mono"
+                        disabled={isPending || isRegenerating}
+                        spellCheck={false}
+                        autoComplete="off"
+                        maxLength={128}
+                    />
+                    <button
+                        type="button"
+                        onClick={handleRegenerate}
+                        disabled={isPending || isRegenerating}
+                        title={t('apiKey.form.regenerate')}
+                        className="h-9 px-3 shrink-0 flex items-center gap-1.5 rounded-xl border border-border bg-muted/20 text-sm text-foreground transition-colors hover:bg-muted/30 disabled:opacity-50"
+                    >
+                        {isRegenerating ? <Loader className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                        {t('apiKey.form.regenerate')}
+                    </button>
+                </div>
             </label>
 
             <div className="grid gap-1 text-xs text-muted-foreground">
@@ -354,7 +399,7 @@ function APIKeyFormOverlay({
     apiKey?: APIKey;
     isPending: boolean;
     submitLabel: string;
-    onSubmit: (data: Omit<APIKey, 'id' | 'api_key'>) => void;
+    onSubmit: (data: CreateAPIKeyRequest) => void;
     onClose: () => void;
 }) {
     return (
@@ -614,7 +659,7 @@ function APIKeyPanelBase({
 
     const disabledHeaderActions = createAPIKey.isPending || isAdding || !!viewingStats || !!editingKey;
 
-    const handleCreate = useCallback((data: Omit<APIKey, 'id' | 'api_key'>) => {
+    const handleCreate = useCallback((data: CreateAPIKeyRequest) => {
         createAPIKey.mutate(data, {
             onSuccess: () => {
                 toast.success(t('apiKey.toast.createSuccess'));
@@ -627,7 +672,7 @@ function APIKeyPanelBase({
         });
     }, [createAPIKey, t]);
 
-    const handleUpdate = useCallback((apiKey: APIKey, data: Omit<APIKey, 'id' | 'api_key'>) => {
+    const handleUpdate = useCallback((apiKey: APIKey, data: CreateAPIKeyRequest) => {
         updateAPIKey.mutate({ id: apiKey.id, ...data }, {
             onSuccess: () => {
                 toast.success(t('apiKey.toast.updateSuccess'));

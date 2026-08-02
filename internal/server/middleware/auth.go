@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/bestruirui/octopus/internal/conf"
 	"github.com/bestruirui/octopus/internal/op"
 	"github.com/bestruirui/octopus/internal/server/auth"
 	"github.com/bestruirui/octopus/internal/server/resp"
@@ -42,17 +41,14 @@ func APIKeyAuth() gin.HandlerFunc {
 			requestType = "openai"
 		}
 
+		apiKey = strings.TrimSpace(apiKey)
+
 		if apiKey == "" {
 			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
 			c.Abort()
 			return
 		}
 
-		if !strings.HasPrefix(apiKey, "sk-"+conf.APP_NAME+"-") {
-			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
-			c.Abort()
-			return
-		}
 		apiKeyObj, err := op.APIKeyGetByAPIKey(apiKey, c.Request.Context())
 		if err != nil {
 			resp.Error(c, http.StatusUnauthorized, resp.ErrUnauthorized)
