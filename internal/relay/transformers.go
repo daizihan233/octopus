@@ -6,6 +6,8 @@ import (
 
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/looplj/axonhub/llm"
+	"github.com/looplj/axonhub/llm/httpclient"
+	"github.com/looplj/axonhub/llm/oauth"
 	"github.com/looplj/axonhub/llm/transformer"
 	"github.com/looplj/axonhub/llm/transformer/anthropic"
 	"github.com/looplj/axonhub/llm/transformer/doubao"
@@ -101,11 +103,21 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 	}
 }
 
-// newCopilotOutbound 用 channel key 作为 GitHub token 构造 Copilot outbound transformer。
+// newCopilotOutbound 从 channel key（OAuthCredentials JSON）构造 Copilot outbound transformer。
 // copilot transformer 会把请求转成 api.githubcopilot.com/chat/completions 格式，
-// 并通过 TokenProvider 自动完成 GitHub token → Copilot JWT 的交换与缓存。
-func newCopilotOutbound(githubToken string, httpClient *http.Client, baseURL string) (transformer.Outbound, error) {
-	tokenProvider := newCopilotTokenProvider(githubToken, httpClient)
+// 并通过 TokenProvider 自动完成 gho token → Copilot JWT 的交换与缓存。
+func newCopilotOutbound(credsJSON string, httpClient *http.Client, baseURL string) (transformer.Outbound, error) {
+	creds, err := oauth.ParseCredentialsJSON(credsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("invalid copilot credentials: %w", err)
+	}
+	tokenProvider, err := copilot.NewTokenProvider(copilot.TokenProviderParams{
+		Credentials: creds,
+		HTTPClient:  httpclient.NewHttpClientWithClient(httpClient),
+	})
+	if err != nil {
+		return nil, err
+	}
 	return copilot.NewOutboundTransformer(copilot.OutboundTransformerParams{
 		TokenProvider: tokenProvider,
 		BaseURL:       baseURL,

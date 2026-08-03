@@ -365,3 +365,36 @@ export function useSyncChannel() {
         },
     });
 }
+
+// ── Copilot Device Flow ──
+
+export function useCopilotStart() {
+    return useMutation({
+        mutationFn: async () => {
+            return apiClient.post<{
+                user_code: string;
+                verification_uri: string;
+                device_code: string;
+                expires_in: number;
+                interval: number;
+            }>('/api/v1/channel/copilot/start');
+        },
+        onSuccess: (data) => {
+            logger.log('Copilot device flow started:', data.user_code);
+        },
+        onError: (error) => {
+            logger.error('Copilot device flow start failed:', error);
+        },
+    });
+}
+
+export function useCopilotPoll() {
+    return useMutation({
+        mutationFn: async (deviceCode: string) => {
+            return apiClient.post<{ status: string; key?: string; channel_id?: number }>(
+                '/api/v1/channel/copilot/poll',
+                { device_code: deviceCode }
+            );
+        },
+    });
+}

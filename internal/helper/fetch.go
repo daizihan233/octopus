@@ -271,15 +271,22 @@ func fetchMiMoJWT(ctx context.Context, client *http.Client, baseURL string) (str
 }
 
 // fetchCopilotModels 调用 Copilot 的 /models 端点获取当前账号可用模型。
-// Copilot 的鉴权分两步：先用 GitHub token 调 api.github.com/copilot_internal/v2/token
-// 换取短期 Copilot JWT，再用它访问 api.githubcopilot.com/models。
+// channel key 是 OAuthCredentials JSON，从中取出 access_token 换 Copilot JWT 再拉模型。
 // 兜底追加 "auto" 模型，保证 Free/学生账号即便返回列表里没有 auto 也能透传使用。
 func fetchCopilotModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
-	githubToken := request.GetChannelKey().ChannelKey
-	if githubToken == "" {
-		return nil, fmt.Errorf("copilot channel missing github token")
+	credsJSON := request.GetChannelKey().ChannelKey
+	if credsJSON == "" {
+		return nil, fmt.Errorf("copilot channel missing credentials")
 	}
-	copilotToken, err := fetchCopilotToken(ctx, client, githubToken)
+	creds, err := parseOAuthCredentials(credsJSON)
+	if err != nil {
+		return nil, fmt.Errorf("invalid copilot credentials: %w", err)
+	}
+	if creds.AccessToken == "" {
+		return nil, fmt.Errorf("copilot credentials missing access_token")
+	}
+
+	copilotToken, err := fetchCopilotToken(ctx, client, creds.AccessToken)
 	if err != nil {
 		return nil, err
 	}
@@ -333,11 +340,9 @@ func fetchCopilotModels(client *http.Client, ctx context.Context, request model.
 }
 
 // fetchCopilotToken 用 GitHub token 换取 Copilot JWT。
-// 与 relay 包里的 copilotTokenProvider 不同，这里不做长期缓存——
-// fetch-model 是手动/低频操作，每次直接交换即可。
-func fetchCopilotToken(ctx context.Context, client *http.Client, githubToken string) (string, error) {
+func fetchCopilotToken(ctx context.Context, client *http.Client, accessToken string) (string, error) {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/v2/token", nil)
-	req.Header.Set("Authorization", "token "+githubToken)
+	req.Header.Set("Authorization", "token "+accessToken)
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Editor-Version", "vscode/1.95.0")
 	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.7")
@@ -363,4 +368,24 @@ func fetchCopilotToken(ctx context.Context, client *http.Client, githubToken str
 		return "", fmt.Errorf("copilot token is empty in response")
 	}
 	return data.Token, nil
+}
+
+// parseOAuthCredentials 从 JSON 反序列化 OAuthCredentials。
+// 用于从 channel key 读取 device flow 授权结果。
+type oauthCredentialsJSON struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	IDToken      string `json:"id_token"`
+	ClientID     string `json:"client_id"`
+	TokenType    string `json:"token_type"`
+	Scopes       []string `json:"scopes"`
+	ExpiresAt    string `json:"expires_at"`
+}
+
+func parseOAuthCredentials(jsonStr string) (*oauthCredentialsJSON, error) {
+	var creds oauthCredentialsJSON
+	if err := json.Unmarshal([]byte(jsonStr), &creds); err != nil {
+		return nil, err
+	}
+	return &creds, nil
 }

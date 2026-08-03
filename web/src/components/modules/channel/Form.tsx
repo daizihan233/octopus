@@ -14,6 +14,7 @@ import { toast } from '@/components/common/Toast';
 import { useTranslations } from 'use-intl';
 import { useEffect, useRef, useState } from 'react';
 import { RefreshCw, X, Plus } from 'lucide-react';
+import { CopilotAuth } from './CopilotAuth';
 
 export interface ChannelKeyFormItem {
     id?: number;
@@ -308,10 +309,25 @@ export function ChannelForm({
             </div>
 
             <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                    <label className="text-sm font-medium text-card-foreground">
-                        {t('apiKey')} {formData.keys.length > 0 ? `(${formData.keys.length})` : ''}
-                    </label>
+                {formData.type === ChannelType.Copilot ? (
+                    <CopilotAuth
+                        existingKey={formData.keys?.[0]?.channel_key || ''}
+                        onKeyObtained={(key) => {
+                            const nextKeys = [...(formData.keys || [])];
+                            if (nextKeys.length === 0) {
+                                nextKeys.push({ enabled: true, channel_key: key, remark: 'GitHub Copilot OAuth' });
+                            } else {
+                                nextKeys[0] = { ...nextKeys[0], channel_key: key };
+                            }
+                            onFormDataChange({ ...formData, keys: nextKeys });
+                        }}
+                    />
+                ) : (
+                    <>
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-card-foreground">
+                                {t('apiKey')} {formData.keys.length > 0 ? `(${formData.keys.length})` : ''}
+                            </label>
                     <Button
                         type="button"
                         variant="ghost"
@@ -359,6 +375,8 @@ export function ChannelForm({
                         </div>
                     ))}
                 </div>
+                </>
+                )}
             </div>
 
             <div className="space-y-2">

@@ -44,6 +44,14 @@ func init() {
 		AddRoute(
 			router.NewRoute("/fetch-model", http.MethodPost).
 				Handle(fetchModel),
+		).
+		AddRoute(
+			router.NewRoute("/copilot/start", http.MethodPost).
+				Handle(copilotStart),
+		).
+		AddRoute(
+			router.NewRoute("/copilot/poll", http.MethodPost).
+				Handle(copilotPoll),
 		)
 	router.NewGroupRouter("/api/v1/channel").
 		Use(middleware.Auth()).
