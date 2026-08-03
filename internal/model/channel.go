@@ -17,6 +17,7 @@ const (
 
 const ChannelTypeDoubao llm.APIFormat = "doubao"
 const ChannelTypeMiMoCode llm.APIFormat = "mimocode"
+const ChannelTypeCopilot llm.APIFormat = "copilot"
 
 type Channel struct {
 	ID            int            `json:"id" gorm:"primaryKey"`

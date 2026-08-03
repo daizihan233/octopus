@@ -2,6 +2,7 @@ package relay
 
 import (
 	"fmt"
+	"net/http"
 
 	dbmodel "github.com/bestruirui/octopus/internal/model"
 	"github.com/looplj/axonhub/llm"
@@ -10,6 +11,7 @@ import (
 	"github.com/looplj/axonhub/llm/transformer/doubao"
 	"github.com/looplj/axonhub/llm/transformer/gemini"
 	"github.com/looplj/axonhub/llm/transformer/openai"
+	"github.com/looplj/axonhub/llm/transformer/openai/copilot"
 	"github.com/looplj/axonhub/llm/transformer/openai/responses"
 )
 
@@ -34,7 +36,7 @@ func newInbound(format llm.APIFormat) transformer.Inbound {
 	}
 }
 
-func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key string) (transformer.Outbound, error) {
+func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key string, httpClient *http.Client) (transformer.Outbound, error) {
 	requestType := llm.RequestTypeChat
 	if request != nil && request.RequestType != "" {
 		requestType = request.RequestType
@@ -89,10 +91,23 @@ func newOutbound(channelType llm.APIFormat, request *llm.Request, baseURL, key s
 			return doubao.NewOutboundTransformer(baseURL, key)
 		case dbmodel.ChannelTypeMiMoCode:
 			return nil, nil
+		case dbmodel.ChannelTypeCopilot:
+			return newCopilotOutbound(key, httpClient, baseURL)
 		default:
 			return nil, fmt.Errorf("channel type %s is not compatible with %s request", channelType, requestType)
 		}
 	default:
 		return nil, fmt.Errorf("%s request is not supported by relay", requestType)
 	}
+}
+
+// newCopilotOutbound 用 channel key 作为 GitHub token 构造 Copilot outbound transformer。
+// copilot transformer 会把请求转成 api.githubcopilot.com/chat/completions 格式，
+// 并通过 TokenProvider 自动完成 GitHub token → Copilot JWT 的交换与缓存。
+func newCopilotOutbound(githubToken string, httpClient *http.Client, baseURL string) (transformer.Outbound, error) {
+	tokenProvider := newCopilotTokenProvider(githubToken, httpClient)
+	return copilot.NewOutboundTransformer(copilot.OutboundTransformerParams{
+		TokenProvider: tokenProvider,
+		BaseURL:       baseURL,
+	})
 }

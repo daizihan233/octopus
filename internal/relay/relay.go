@@ -147,7 +147,13 @@ func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
 		return nil, nil
 	}
 
-	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey)
+	httpClient, err := helper.ChannelHttpClient(channel)
+	if err != nil {
+		r.iter.Skip(channel.ID, usedKey.ID, channel.Name, err.Error())
+		return nil, nil
+	}
+
+	outAdapter, err := newOutbound(channel.Type, r.internalRequest, channel.GetBaseUrl(), usedKey.ChannelKey, httpClient)
 	if err != nil {
 		r.iter.Skip(channel.ID, usedKey.ID, channel.Name, err.Error())
 		return nil, nil

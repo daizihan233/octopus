@@ -539,6 +539,7 @@
             "typeGemini": "Gemini",
             "typeVolcengine": "Volcengine",
             "typeMiMoCode": "MiMoCode",
+            "typeCopilot": "GitHub Copilot",
             "autoSync": "Auto Sync",
             "autoGroup": "Auto Group",
             "autoGroupNone": "None",

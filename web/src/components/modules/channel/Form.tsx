@@ -257,6 +257,7 @@ export function ChannelForm({
                             <SelectItem className='rounded-xl' value={String(ChannelType.Volcengine)}>{t('typeVolcengine')}</SelectItem>
                             <SelectItem className='rounded-xl' value={String(ChannelType.OpenAIEmbedding)}>{t('typeOpenAIEmbedding')}</SelectItem>
                             <SelectItem className='rounded-xl' value={String(ChannelType.MiMoCode)}>{t('typeMiMoCode')}</SelectItem>
+                            <SelectItem className='rounded-xl' value={String(ChannelType.Copilot)}>{t('typeCopilot')}</SelectItem>
                         </SelectContent>
                     </Select>
                 </div>

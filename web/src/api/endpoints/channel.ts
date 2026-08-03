@@ -14,6 +14,7 @@ export enum ChannelType {
     Volcengine = 'doubao',
     OpenAIEmbedding = 'openai/embeddings',
     MiMoCode = 'mimocode',
+    Copilot = 'copilot',
 }
 
 /**

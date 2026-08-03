@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/user"
@@ -31,6 +32,8 @@ func FetchModels(ctx context.Context, request model.Channel) ([]string, error) {
 		fetchModel, err = fetchGeminiModels(client, ctx, request)
 	case model.ChannelTypeMiMoCode:
 		fetchModel, err = fetchMiMoCodeModels(client, ctx, request)
+	case model.ChannelTypeCopilot:
+		fetchModel, err = fetchCopilotModels(client, ctx, request)
 	default:
 		fetchModel, err = fetchOpenAIModels(client, ctx, request)
 	}
@@ -265,4 +268,99 @@ func fetchMiMoJWT(ctx context.Context, client *http.Client, baseURL string) (str
 		return "", err
 	}
 	return data.JWT, nil
+}
+
+// fetchCopilotModels 调用 Copilot 的 /models 端点获取当前账号可用模型。
+// Copilot 的鉴权分两步：先用 GitHub token 调 api.github.com/copilot_internal/v2/token
+// 换取短期 Copilot JWT，再用它访问 api.githubcopilot.com/models。
+// 兜底追加 "auto" 模型，保证 Free/学生账号即便返回列表里没有 auto 也能透传使用。
+func fetchCopilotModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
+	githubToken := request.GetChannelKey().ChannelKey
+	if githubToken == "" {
+		return nil, fmt.Errorf("copilot channel missing github token")
+	}
+	copilotToken, err := fetchCopilotToken(ctx, client, githubToken)
+	if err != nil {
+		return nil, err
+	}
+
+	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
+	if baseURL == "" {
+		baseURL = "https://api.githubcopilot.com"
+	}
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, baseURL+"/models", nil)
+	req.Header.Set("Authorization", "Bearer "+copilotToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Editor-Version", "vscode/1.95.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.7")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
+	req.Header.Set("copilot-integration-id", "vscode-chat")
+	req.Header.Set("x-github-api-version", "2025-04-01")
+	applyCustomHeaders(req, request)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("copilot models %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Data []struct {
+			ID string `json:"id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	models := make([]string, 0, len(result.Data)+1)
+	hasAuto := false
+	for _, m := range result.Data {
+		if m.ID == "auto" {
+			hasAuto = true
+		}
+		models = append(models, m.ID)
+	}
+	// Free/学生账号可能不返回 auto，但 Copilot 服务端始终接受 "auto" 作为合法模型名，透传即可
+	if !hasAuto {
+		models = append([]string{"auto"}, models...)
+	}
+	return models, nil
+}
+
+// fetchCopilotToken 用 GitHub token 换取 Copilot JWT。
+// 与 relay 包里的 copilotTokenProvider 不同，这里不做长期缓存——
+// fetch-model 是手动/低频操作，每次直接交换即可。
+func fetchCopilotToken(ctx context.Context, client *http.Client, githubToken string) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/v2/token", nil)
+	req.Header.Set("Authorization", "token "+githubToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Editor-Version", "vscode/1.95.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.7")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("copilot token exchange failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("copilot token exchange %d: %s", resp.StatusCode, string(body))
+	}
+
+	var data struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return "", err
+	}
+	if data.Token == "" {
+		return "", fmt.Errorf("copilot token is empty in response")
+	}
+	return data.Token, nil
 }
