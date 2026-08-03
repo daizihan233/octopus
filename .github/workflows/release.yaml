@@ -50,6 +50,9 @@ jobs:
       - name: Get latest tag
         id: tag
         run: |
+          # 重新拉取最新 tags：actions/checkout 的 checkout 时刻可能早于 tag 推送，
+          # 若直接用 describe 会回退到上一个 tag，导致 Release assets 与 Docker 镜像错标版本。
+          git fetch --tags --force origin
           LATEST_TAG=$(git describe --tags --abbrev=0)
           echo "TAG_NAME=$LATEST_TAG" >> $GITHUB_OUTPUT
 
