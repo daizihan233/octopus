@@ -44,15 +44,20 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: web/pnpm-lock.yaml
 
+      - name: Fetch latest tags
+        run: |
+          # 重新拉取最新 tags：actions/checkout 的 checkout 时刻可能早于 tag 推送，
+          # 若直接用 describe 会回退到上一个 tag，导致二进制内嵌版本、Release assets
+          # 与 Docker 镜像全部错标上一个版本。必须在 Build（build.sh 用 describe 注入
+          # conf.Version）之前先 fetch，保证内嵌版本与产物 tag 一致。
+          git fetch --tags --force origin
+
       - name: Build
         run: bash scripts/build.sh release
 
       - name: Get latest tag
         id: tag
         run: |
-          # 重新拉取最新 tags：actions/checkout 的 checkout 时刻可能早于 tag 推送，
-          # 若直接用 describe 会回退到上一个 tag，导致 Release assets 与 Docker 镜像错标版本。
-          git fetch --tags --force origin
           LATEST_TAG=$(git describe --tags --abbrev=0)
           echo "TAG_NAME=$LATEST_TAG" >> $GITHUB_OUTPUT
 
