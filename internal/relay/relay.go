@@ -355,14 +355,45 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 	ra.c.Header("X-Accel-Buffering", "no")
 
 	firstToken := true
+	// responseEvents 仅用于日志聚合，若不设上限，恶意或超长流会让请求进程
+	// 为审计日志线性累积内存。透传不受影响，超限后不再收集分片即可。
+	const (
+		maxStreamLogBytes    = 1 << 20  // 1 MiB，防御超长内容流
+		maxStreamLogEvents   = 1 << 14  // 16k 条，防御海量小分片事件
+		maxStreamUsageEvents = 8        // 截断后仍保留的 usage 事件条数上限
+		maxStreamUsageBytes  = 64 << 10 // 64 KiB，截断后保留的 usage 事件字节上限
+	)
 	responseEvents := make([]*httpclient.StreamEvent, 0, 8)
+	responseLogBytes := 0
+	usageEvents := 0
+	usageLogBytes := 0
 	type sseReadResult struct {
 		event *httpclient.StreamEvent
 		err   error
 	}
 	results := make(chan sseReadResult, 1)
 	done := make(chan struct{})
+
+	// 兜底聚合日志的最终响应体。流结束后 results channel 关闭（!ok）和客户端断开
+	// 触发的 ctx.Done() 几乎同时就绪，select 可能随机选中 ctx.Done 分支直接返回，
+	// 从而跳过下面的聚合逻辑，导致流式日志的 ResponseContent 长期为空。用 defer
+	// 保证无论从哪条路径退出，只要已经向客户端写出过事件，就聚合一次给日志落库。
+	defer func() {
+		if len(responseEvents) == 0 {
+			return
+		}
+		responseBody, meta, aggErr := ra.inAdapter.AggregateStreamChunks(context.WithoutCancel(ctx), responseEvents)
+		if aggErr != nil {
+			log.Warnf("failed to aggregate stream response for log: %v", aggErr)
+			return
+		}
+		ra.metrics.InternalResponse = responseBody
+		ra.metrics.RecordUsage(meta.Usage)
+	}()
+	// LIFO：该 defer 后注册，返回时先执行，尽早关闭 done 让后端读取 goroutine 退出，
+	// 随后上方的聚合 defer 再执行，避免聚合期间阻塞读取协程。
 	defer close(done)
+
 	go func() {
 		defer close(results)
 		defer clientStream.Close()
@@ -421,18 +452,8 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 		case r, ok := <-results:
 			if !ok {
 				log.Infof("stream end")
-				if len(responseEvents) == 0 {
-					return nil
-				}
-				// 客户端请求流式时，pipeline 只负责边转边写，不会自动生成完整响应体。
-				// 这里复用同一个 inbound 聚合器把已经写给客户端的事件合成最终 body，日志只落一次最终响应。
-				responseBody, meta, err := ra.inAdapter.AggregateStreamChunks(context.WithoutCancel(ctx), responseEvents)
-				if err != nil {
-					log.Warnf("failed to aggregate stream response for log: %v", err)
-					return nil
-				}
-				ra.metrics.InternalResponse = responseBody
-				ra.metrics.RecordUsage(meta.Usage)
+				// 聚合逻辑统一由上面的 defer 兜底执行，保证正常结束、客户端断开、
+				// 读事件错误等所有退出路径都不会遗漏日志响应体。
 				return nil
 			}
 			if r.err != nil {
@@ -444,7 +465,17 @@ func (ra *relayAttempt) writeStream(ctx context.Context, clientStream streams.St
 				continue
 			}
 			// 这里只临时保存 pipeline 已经转换好的客户端格式事件，正常结束后聚合成最终响应体用于日志；不会把分片逐条落库。
-			responseEvents = append(responseEvents, r.event)
+			// 达到 maxStreamLogBytes / maxStreamLogEvents 后停止收集，避免日志聚合缓冲被超长/恶意流撑爆，透传给客户端不受影响。
+			// 超限后仍单独保留 usage 事件，保证超长请求的用量/费用统计不因日志截断而漏记；
+			// usage 事件按条数与字节双重限额（真实上游通常仅 1-2 条且很小），避免恶意巨型 usage 事件绕过预算。
+			if responseLogBytes < maxStreamLogBytes && len(responseEvents) < maxStreamLogEvents {
+				responseEvents = append(responseEvents, r.event)
+				responseLogBytes += len(r.event.Data)
+			} else if usageEvents < maxStreamUsageEvents && usageLogBytes < maxStreamUsageBytes && bytes.Contains(r.event.Data, []byte(`"usage"`)) {
+				responseEvents = append(responseEvents, r.event)
+				usageEvents++
+				usageLogBytes += len(r.event.Data)
+			}
 			if firstToken {
 				ra.metrics.FirstTokenTime = time.Now()
 				firstToken = false
