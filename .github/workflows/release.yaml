@@ -58,7 +58,8 @@ jobs:
       - name: Get latest tag
         id: tag
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0)
+          # --match 限定版本号格式，避免误建/异常 tag 污染 describe 结果。
+          LATEST_TAG=$(git describe --tags --match 'v[0-9]*' --abbrev=0)
           echo "TAG_NAME=$LATEST_TAG" >> $GITHUB_OUTPUT
 
       - name: Upload Release
