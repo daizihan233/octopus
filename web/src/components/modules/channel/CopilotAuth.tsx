@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ExternalLink, Loader2, CheckCircle, XCircle, RefreshCw } from 'lucide-react';
 import { toast } from '@/components/common/Toast';
 import { useTranslations } from 'use-intl';
+import { useAuthStore } from '@/api/endpoints/user';
 
 interface CopilotAuthProps {
     existingKey: string;
@@ -38,7 +39,7 @@ export function CopilotAuth({ existingKey, onKeyObtained }: CopilotAuthProps) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    'Authorization': `Bearer ${useAuthStore.getState().token}`,
                 },
             });
             const data = await resp.json();
@@ -78,7 +79,7 @@ export function CopilotAuth({ existingKey, onKeyObtained }: CopilotAuthProps) {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                    'Authorization': `Bearer ${useAuthStore.getState().token}`,
                 },
                 body: JSON.stringify({ device_code: code }),
             });
