@@ -18,6 +18,7 @@ type ChannelAttempt struct {
 	ModelName    string        `json:"model_name"`
 	AttemptNum   int           `json:"attempt_num"`
 	Status       AttemptStatus `json:"status"`
+	StatusCode   int           `json:"status_code,omitempty"` // 上游 HTTP 状态码（真实转发失败时），用于区分 429 等
 	Duration     int           `json:"duration"`
 	Sticky       bool          `json:"sticky,omitempty"`
 	Msg          string        `json:"msg,omitempty"`

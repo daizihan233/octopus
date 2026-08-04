@@ -49,6 +49,7 @@
         "group": "分组",
         "key": "密钥",
         "model": "价格",
+        "monitor": "监控",
         "log": "日志",
         "setting": "设置"
     },
@@ -428,6 +429,33 @@
             "cacheWrite": "缓存写入",
             "save": "保存"
         }
+    },
+    "monitor": {
+        "connected": "实时",
+        "connecting": "连接中...",
+        "disconnected": "已断开",
+        "noData": "等待请求...",
+        "waiting": "暂无调用记录",
+        "status": {
+            "ok": "成功",
+            "rateLimited": "429 / 无可用 Key",
+            "error": "错误",
+            "canceled": "上下文取消"
+        },
+        "cooldownYellow": "冷却中",
+        "cooldownRed": "熔断中",
+        "lastTime": "最近调用",
+        "source": "来源",
+        "apiSource": "API Key",
+        "avgFtut": "平均首字",
+        "avgUseTime": "平均耗时",
+        "totalInput": "总输入",
+        "totalOutput": "总输出",
+        "totalCost": "总费用",
+        "ftut": "首字时间",
+        "use_time": "使用时间",
+        "use_time_short": "耗时",
+        "windowSize": "统计窗口：最近 {n} 次调用"
     },
     "log": {
         "list": {

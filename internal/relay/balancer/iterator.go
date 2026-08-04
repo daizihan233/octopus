@@ -149,6 +149,11 @@ type AttemptSpan struct {
 	ended     bool
 }
 
+// SetStatusCode 记录上游 HTTP 状态码（真实转发失败时由 relay 设置，供监控/日志分级）
+func (s *AttemptSpan) SetStatusCode(code int) {
+	s.attempt.StatusCode = code
+}
+
 // End 结束尝试：设置状态，自动计算耗时，追加到 Iterator
 func (s *AttemptSpan) End(status model.AttemptStatus, msg string) {
 	if s.ended {

@@ -49,6 +49,7 @@
         "group": "Group",
         "key": "Key",
         "model": "Price",
+        "monitor": "Monitor",
         "log": "Log",
         "setting": "Setting"
     },
@@ -428,6 +429,33 @@
             "cacheWrite": "Cache Write",
             "save": "Save"
         }
+    },
+    "monitor": {
+        "connected": "Live",
+        "connecting": "Connecting...",
+        "disconnected": "Disconnected",
+        "noData": "Waiting for requests...",
+        "waiting": "No calls yet",
+        "status": {
+            "ok": "Success",
+            "rateLimited": "429 / no available key",
+            "error": "Error",
+            "canceled": "Context canceled"
+        },
+        "cooldownYellow": "Cooldown",
+        "cooldownRed": "Circuit open",
+        "lastTime": "Last call",
+        "source": "Source",
+        "apiSource": "API key",
+        "avgFtut": "Avg TTFT",
+        "avgUseTime": "Avg total",
+        "totalInput": "Input",
+        "totalOutput": "Output",
+        "totalCost": "Cost",
+        "ftut": "TTFT",
+        "use_time": "Use time",
+        "use_time_short": "Total",
+        "windowSize": "Window: last {n} calls"
     },
     "log": {
         "list": {

@@ -49,6 +49,7 @@
         "group": "分組",
         "key": "金鑰",
         "model": "價格",
+        "monitor": "監控",
         "log": "日誌",
         "setting": "設定"
     },
@@ -428,6 +429,33 @@
             "cacheWrite": "快取寫入",
             "save": "儲存"
         }
+    },
+    "monitor": {
+        "connected": "即時",
+        "connecting": "連線中...",
+        "disconnected": "已斷線",
+        "noData": "等待請求...",
+        "waiting": "暫無呼叫記錄",
+        "status": {
+            "ok": "成功",
+            "rateLimited": "429 / 無可用 Key",
+            "error": "錯誤",
+            "canceled": "上下文取消"
+        },
+        "cooldownYellow": "冷卻中",
+        "cooldownRed": "熔斷中",
+        "lastTime": "最近呼叫",
+        "source": "來源",
+        "apiSource": "API Key",
+        "avgFtut": "平均首字",
+        "avgUseTime": "平均耗時",
+        "totalInput": "總輸入",
+        "totalOutput": "總輸出",
+        "totalCost": "總費用",
+        "ftut": "首字時間",
+        "use_time": "使用時間",
+        "use_time_short": "耗時",
+        "windowSize": "統計窗口：最近 {n} 次調用"
     },
     "log": {
         "list": {

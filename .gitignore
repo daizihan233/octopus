@@ -4,3 +4,10 @@ tmp
 static/out/*
 !static/out/README.md
 .vscode
+web/.next
+web/next-env.d.ts
+.next
+.idea
+.mimocode
+.omo
+.reasonix

@@ -201,6 +201,7 @@ func (ra *relayAttempt) run() (bool, error) {
 	}
 
 	op.ChannelKeyUpdate(ra.usedKey)
+	span.SetStatusCode(upstreamStatusCode)
 	span.End(dbmodel.AttemptFailed, fwdErr.Error())
 	op.StatsChannelUpdate(ra.channel.ID, dbmodel.StatsMetrics{
 		WaitTime:      span.Duration().Milliseconds(),

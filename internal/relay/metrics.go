@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"net/http"
+	"strings"
 	"time"
 
 	"github.com/bestruirui/octopus/internal/model"
@@ -143,6 +145,66 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 
 	// 客户端断开或请求上下文取消后仍要保存最终审计日志，因此持久化阶段主动脱离请求取消信号。
 	m.saveLog(context.WithoutCancel(ctx), err, duration, attempts, channelID, channelName)
+	m.saveMonitor(ctx, err, duration, attempts)
+}
+
+// monitorCallStatus 按需求把每次渠道尝试分类为竖条颜色状态。
+// 绿=成功响应；黄=上游429或所有key都429(no available key)；红=其他错误；灰=context canceled。
+func monitorCallStatus(a model.ChannelAttempt) string {
+	switch a.Status {
+	case model.AttemptSuccess:
+		return "ok"
+	case model.AttemptFailed:
+		if a.StatusCode == http.StatusTooManyRequests {
+			return "429"
+		}
+		return "error"
+	case model.AttemptSkipped:
+		if strings.Contains(a.Msg, "no available key") {
+			return "429"
+		}
+		return "error"
+	case model.AttemptCircuitBreak:
+		return "error"
+	default:
+		return "error"
+	}
+}
+
+// saveMonitor 把本次请求的每次渠道尝试写入可用性监控缓存。
+// 成功尝试的令牌/耗时/费用整条归到唯一成功通道；(channel, modelName) 用分组项的
+// 模型名（auto 模型的候选即 "auto"），满足"auto 记到对应渠道的 auto 模型下"。
+func (m *RelayMetrics) saveMonitor(ctx context.Context, err error, duration time.Duration, attempts []model.ChannelAttempt) {
+	apiKeyName := m.requestSourceName()
+	ts := m.StartTime.Unix()
+
+	for _, a := range attempts {
+		call := op.MonitorCall{Time: ts}
+		if a.Status == model.AttemptSuccess {
+			call.Status = "ok"
+			if !m.FirstTokenTime.IsZero() {
+				call.Ftut = int64(m.FirstTokenTime.Sub(m.StartTime).Milliseconds())
+				if call.Ftut < 0 {
+					call.Ftut = 0
+				}
+			}
+			call.UseTime = duration.Milliseconds()
+			call.Input = m.Stats.InputToken
+			call.Output = m.Stats.OutputToken
+			call.Cost = m.Stats.InputCost + m.Stats.OutputCost
+		} else {
+			call.Status = monitorCallStatus(a)
+			call.UseTime = int64(a.Duration)
+		}
+		op.MonitorCallAdd(a.ChannelID, a.ChannelName, a.ModelName, call, apiKeyName)
+	}
+}
+
+func (m *RelayMetrics) requestSourceName() string {
+	if apiKey, err := op.APIKeyGet(m.APIKeyID, context.Background()); err == nil {
+		return apiKey.Name
+	}
+	return ""
 }
 
 func finalChannel(attempts []model.ChannelAttempt) (int, string) {

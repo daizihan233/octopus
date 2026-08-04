@@ -28,6 +28,10 @@ var relayLogSubscribersLock sync.RWMutex
 var relayLogStreamTokens = make(map[string]struct{})
 var relayLogStreamTokensLock sync.RWMutex
 
+// Monitor 专用 token 池，与 log 隔离，满足最小权限原则。
+var monitorStreamTokens = make(map[string]struct{})
+var monitorStreamTokensLock sync.RWMutex
+
 func RelayLogStreamTokenCreate() (string, error) {
 	bytes := make([]byte, 32)
 	if _, err := rand.Read(bytes); err != nil {
@@ -53,6 +57,36 @@ func RelayLogStreamTokenRevoke(token string) {
 	relayLogStreamTokensLock.Lock()
 	delete(relayLogStreamTokens, token)
 	relayLogStreamTokensLock.Unlock()
+}
+
+// MonitorStreamTokenCreate 创建 Monitor SSE 专用的一次性 token（与 log 隔离）。
+func MonitorStreamTokenCreate() (string, error) {
+	bytes := make([]byte, 32)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	token := hex.EncodeToString(bytes)
+
+	monitorStreamTokensLock.Lock()
+	monitorStreamTokens[token] = struct{}{}
+	monitorStreamTokensLock.Unlock()
+
+	return token, nil
+}
+
+// MonitorStreamTokenVerify 校验 Monitor SSE token。
+func MonitorStreamTokenVerify(token string) bool {
+	monitorStreamTokensLock.RLock()
+	_, ok := monitorStreamTokens[token]
+	monitorStreamTokensLock.RUnlock()
+	return ok
+}
+
+// MonitorStreamTokenRevoke 撤销 Monitor SSE token（使用后一次性销毁）。
+func MonitorStreamTokenRevoke(token string) {
+	monitorStreamTokensLock.Lock()
+	delete(monitorStreamTokens, token)
+	monitorStreamTokensLock.Unlock()
 }
 
 func RelayLogSubscribe() chan model.RelayLog {
