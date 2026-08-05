@@ -126,18 +126,19 @@ There is **no Makefile**, no golangci-lint config, and essentially **no Go test 
 | `release` | `.github/workflows/release.yaml` | push to `master` / manual dispatch | `scripts/build.sh release` → GitHub Release assets + Docker (Alpine + Debian) to GHCR/Docker Hub |
 | `changelog` | `.github/workflows/changelog.yml` | push tag `v*` | `changelogithub` creates a GitHub Release with auto-generated notes → force-merges `dev` → `master` |
 
-**Correct release flow (with critical timing caveat):**
+**Correct release flow (verified on v0.12.1 — tag-first + manual dispatch):**
 1. Commit + push to `dev`
-2. `git checkout master && git merge dev && git push` — triggers `release.yaml`
-3. `git tag v0.10.XX && git push origin v0.10.XX` — triggers `changelog.yml` which creates the Release + merges dev back to master
+2. `git tag -a v0.12.X -m "v0.12.X"` (pointing at dev HEAD) → `git push origin v0.12.X` — triggers `changelog.yml` which creates the Release + force-merges `dev` → `master`
+3. **Manually dispatch the build**: `gh workflow run release.yaml --ref master` — triggers `release.yaml`
+
+⚠️ **Do NOT push master first and tag second.** The `release.yaml` workflow is triggered by pushes to `master` (e.g. the changelog force-merge). But GitHub Actions **does not fire `push` workflows for commits pushed by `GITHUB_TOKEN`** (anti-recursion). So after step 2 you will *not* see a release run appear automatically — check `gh run list`; if absent, dispatch it manually (step 3). By the time the dispatched run checks out and fetches tags, the new tag is already on the remote, so `git describe --tags --abbrev=0` resolves to the new version and everything lands correctly. This is the reliable flow (used for v0.12.1: one clean run).
 
 ⚠️ **Don't** manually create a release with `gh release create` before pushing the tag — `changelog.yml` will fail with 422 (duplicate). Let the workflow create it.
 
-⚠️ **Timing race (the real gotcha, seen in practice):** The `release.yaml` workflow checks out `ref: master` then runs `git describe --tags --abbrev=0` (in `build.sh` and again in the "Get latest tag" step) to find the *latest* tag and uses it for the Release `tag_name` and the Docker image tags. If you `git push master` (step 2) and only *then* `git push origin v0.X` (step 3), the release workflow usually starts on the master push and runs its checkout + `git fetch --tags` **before** the tag has landed on the remote — so `git describe` falls back to the **previous** tag. Consequences:
+⚠️ **Timing race (v0.12.0, seen in practice):** If you instead rely on a real `git push origin master` to trigger `release.yaml` and only push the tag *afterwards*, the run usually checks out + fetches tags **before** the tag has landed — `git describe` falls back to the **previous** tag. Consequences:
    - the archives get uploaded to the *old* release (`softprops/action-gh-release` with `overwrite_files: true` overwrites its assets!), and
    - Docker images get tagged with the old version too, while the new tag's release sits empty.
-
-   **To avoid it**, don't split the two pushes ~seconds apart. Because the release run is *started* by the master push, the only reliable way to guarantee the new tag already exists when the workflow snapshots tags is to push the tag **before** the release job reaches `Describe` — which you can't control from a single push. The robust fix is: after pushing `master` + tag, **verify assets landed on the correct release** (`gh release view v0.X --json assets`). If they landed on the wrong/old release (or the run failed), **re-run `release.yaml` via manual dispatch** (`gh workflow run release.yaml --ref master`). On a manual dispatch the tag is already on the remote, so `git describe` resolves to the new tag and rebuilds/records everything correctly.
+   Fix: clean up the misplaced assets (`gh release delete-asset <old-tag> <name> --repo <owner>/octopus -y` for each), then re-run `release.yaml` via manual dispatch.
 
 **What `release.yaml` actually does (in order), so you know what to verify:**
    `checkout ref:master` → `git fetch --tags --force` → `build.sh release` (builds frontend + 8 platform archives, `GIT_VERSION` = `git describe --tags --abbrev=0` injected into `internal/conf.Version`) → "Get latest tag" (`git describe --tags --match 'v[0-9]*' --abbrev=0`, stored as `TAG_NAME`) → `Upload Release` (`softprops/action-gh-release`, files=`build/archives/*` → release whose tag is `TAG_NAME`, `overwrite_files: true`) → docker build+push Alpine then Debian (tags `latest`, `latest-alpine`, `$TAG_NAME`, `$TAG_NAME-alpine` → GHCR + Docker Hub).
