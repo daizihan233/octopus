@@ -44,6 +44,10 @@ type MonitorRow struct {
 	SuccessOutput     int64   `json:"success_output"`
 	SuccessCost       float64 `json:"success_cost"`
 
+	// 当前窗口内成功调用的首字时间极值（与竖条时间轴一致；无成功调用时为 0）
+	SuccessFtutMin int64 `json:"success_ftut_min"`
+	SuccessFtutMax int64 `json:"success_ftut_max"`
+
 	Calls []MonitorCall `json:"calls"`
 }
 
@@ -131,6 +135,21 @@ func MonitorCallAdd(channelID int, channelName, modelName string, call MonitorCa
 	row.Calls = append(row.Calls, call)
 	if len(row.Calls) > monitorWindowSize {
 		row.Calls = row.Calls[len(row.Calls)-monitorWindowSize:]
+	}
+
+	// 重算当前窗口内成功调用的首字时间极值（窗口滚动后旧数据被挤出，需重扫）
+	row.SuccessFtutMin = 0
+	row.SuccessFtutMax = 0
+	for _, c := range row.Calls {
+		if c.Status != "ok" || c.Ftut <= 0 {
+			continue
+		}
+		if row.SuccessFtutMin == 0 || c.Ftut < row.SuccessFtutMin {
+			row.SuccessFtutMin = c.Ftut
+		}
+		if c.Ftut > row.SuccessFtutMax {
+			row.SuccessFtutMax = c.Ftut
+		}
 	}
 	monitorCacheLock.Unlock()
 

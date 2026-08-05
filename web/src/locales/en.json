@@ -448,6 +448,8 @@
         "source": "Source",
         "apiSource": "API key",
         "avgFtut": "Avg TTFT",
+        "fastestFtut": "Fastest TTFT",
+        "slowestFtut": "Slowest TTFT",
         "avgUseTime": "Avg total",
         "totalInput": "Input",
         "totalOutput": "Output",

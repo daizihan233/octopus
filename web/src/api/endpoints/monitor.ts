@@ -40,6 +40,9 @@ export interface MonitorRow {
     success_output: number;
     success_cost: number;
 
+    success_ftut_min: number; // 窗口内成功调用首字最快(ms)
+    success_ftut_max: number; // 窗口内成功调用首字最慢(ms)
+
     calls: MonitorCall[];
 
     yellow_cooldown: number; // key 429 冷却剩余(秒)

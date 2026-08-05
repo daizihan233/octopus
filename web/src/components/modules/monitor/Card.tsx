@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { Clock, Zap, Cpu, ArrowDownToLine, ArrowUpFromLine, DollarSign, Timer, Loader2 } from 'lucide-react';
+import { Clock, Zap, Cpu, ArrowDownToLine, ArrowUpFromLine, DollarSign, Timer, Rocket, TrendingUp, Loader2 } from 'lucide-react';
 import { getModelIcon } from '@/lib/model-icons';
 import { type MonitorRow, type MonitorCall } from '@/api/endpoints/monitor';
 import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/animate-ui/components/animate/tooltip';
@@ -95,24 +95,39 @@ export function MonitorCard({ row, t }: { row: MonitorRow; t: (key: string) => s
                         )}
                         {calls.slice(-30).map((c) => {
                             const meta = STATUS_META[c.status];
+                            const isOk = c.status === 'ok';
                             let heightPct = 100;
-                            if (c.status === 'ok') {
+                            if (isOk) {
                                 const ms = c.use_time > 0 ? c.use_time : c.ftut;
                                 heightPct = maxSuccessMs > 0 ? Math.max(10, Math.round((ms / maxSuccessMs) * 100)) : 10;
                             }
                             return (
                                 <Tooltip key={c.seq}>
                                     <TooltipTrigger asChild>
-                                        <div
-                                            className="w-1 rounded-sm shrink-0"
-                                            style={{ height: `${heightPct}%`, backgroundColor: meta.color }}
-                                        />
+                                        {isOk ? (
+                                            // 绿色竖条：底部真实色条 + 100% 高半灰命中区。
+                                            // 竖条很矮时也能方便 hover；hover 时灰底变黑、绿条变深绿。
+                                            <div
+                                                className="group relative w-1 rounded-sm shrink-0 cursor-pointer bg-emerald-500/15 transition-colors hover:bg-black"
+                                                style={{ height: '100%' }}
+                                            >
+                                                <div
+                                                    className="absolute bottom-0 left-0 right-0 w-full rounded-sm bg-emerald-500 transition-colors group-hover:bg-emerald-800"
+                                                    style={{ height: `${heightPct}%` }}
+                                                />
+                                            </div>
+                                        ) : (
+                                            <div
+                                                className="w-1 rounded-sm shrink-0 cursor-pointer transition-[filter] hover:brightness-75"
+                                                style={{ height: '100%', backgroundColor: meta.color }}
+                                            />
+                                        )}
                                     </TooltipTrigger>
                                     <TooltipContent className="border bg-card p-2 rounded-xl text-xs flex flex-col gap-0.5">
                                         <span>{formatTime(c.time)}</span>
                                         <span>{t(meta.labelKey)}</span>
                                         <span>{t('use_time')} {formatDuration(c.use_time)}</span>
-                                        {c.status === 'ok' && <span>{t('ftut')} {formatDuration(c.ftut)}</span>}
+                                        {isOk && <span>{t('ftut')} {formatDuration(c.ftut)}</span>}
                                     </TooltipContent>
                                 </Tooltip>
                             );
@@ -120,9 +135,11 @@ export function MonitorCard({ row, t }: { row: MonitorRow; t: (key: string) => s
                     </div>
                 </div>
 
-                {/* 下方：一行紧凑指标 */}
-                <div className="flex items-center gap-x-4 text-xs text-muted-foreground pt-1 border-t border-border/60 min-w-0">
+                {/* 下方：分散指标栏 */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-x-6 gap-y-2 text-xs text-muted-foreground pt-2 border-t border-border/60">
                     <Metric icon={<Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />} label={t('lastTime')} value={formatTime(row.time)} />
+                    <Metric icon={<Rocket className="size-3.5 shrink-0 text-emerald-500" />} label={t('fastestFtut')} value={row.success_ftut_min > 0 ? formatDuration(row.success_ftut_min) : '-'} />
+                    <Metric icon={<TrendingUp className="size-3.5 shrink-0 text-orange-500" />} label={t('slowestFtut')} value={row.success_ftut_max > 0 ? formatDuration(row.success_ftut_max) : '-'} />
                     <Metric icon={<Zap className="size-3.5 shrink-0 text-amber-500" />} label={t('avgFtut')} value={row.success_count ? formatDuration(Math.round(avgFtut)) : '-'} />
                     <Metric icon={<Cpu className="size-3.5 shrink-0 text-blue-500" />} label={t('avgUseTime')} value={row.success_count ? formatDuration(Math.round(avgUseTime)) : '-'} />
                     <Metric icon={<ArrowDownToLine className="size-3.5 shrink-0 text-green-500" />} label={t('totalInput')} value={formatToken(row.input_total)} />
@@ -139,7 +156,8 @@ function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; 
     return (
         <div className="flex items-center gap-1.5 min-w-0" title={`${label}: ${value}`}>
             {icon}
-            <span className="truncate tabular-nums">{value}</span>
+            <span className="text-muted-foreground/80 shrink-0">{label}</span>
+            <span className="truncate tabular-nums ml-auto">{value}</span>
         </div>
     );
 }

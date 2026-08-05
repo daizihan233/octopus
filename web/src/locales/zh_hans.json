@@ -448,6 +448,8 @@
         "source": "来源",
         "apiSource": "API Key",
         "avgFtut": "平均首字",
+        "fastestFtut": "首字最快",
+        "slowestFtut": "首字最慢",
         "avgUseTime": "平均耗时",
         "totalInput": "总输入",
         "totalOutput": "总输出",
