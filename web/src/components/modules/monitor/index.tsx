@@ -85,10 +85,10 @@ export function Monitor() {
         return (
             <VirtualizedGrid
                 items={rows}
-                layout="grid"
-                columns={{ default: 1, md: 2, xl: 3 }}
-                estimateItemHeight={280}
-                overscan={4}
+                layout="list"
+                columns={{ default: 1 }}
+                estimateItemHeight={64}
+                overscan={8}
                 getItemKey={(row) => `monitor-${row.channel_id}-${row.model_name}`}
                 renderItem={(row) => <MonitorCard row={row} t={t} />}
             />

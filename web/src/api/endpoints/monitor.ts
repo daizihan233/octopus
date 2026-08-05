@@ -7,6 +7,7 @@ import type { RelayLog } from './log';
  * 单次渠道尝试的可用性竖条数据
  */
 export interface MonitorCall {
+    seq: number;            // 全局唯一序号，用作竖条稳定 key
     time: number;           // 调用时间(秒)
     status: 'ok' | '429' | 'error' | 'cancel';
     ftut: number;           // 首字时间(ms)，仅成功

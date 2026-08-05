@@ -1,4 +1,4 @@
-import { useMemo, type ReactNode } from 'react';
+import { useMemo } from 'react';
 import { Clock, Zap, Cpu, ArrowDownToLine, ArrowUpFromLine, DollarSign, Timer, Loader2 } from 'lucide-react';
 import { getModelIcon } from '@/lib/model-icons';
 import { type MonitorRow, type MonitorCall } from '@/api/endpoints/monitor';
@@ -28,10 +28,10 @@ function formatToken(n: number): string {
 }
 
 /**
- * 单个 (channel, model) 可用性监控卡片
- * - 右侧竖条区：最近若干次尝试，绿色=成功，黄色=429，红色=错误，灰色=cancel
- *   （黄/红/灰恒为 100% 高；绿色高度按统计周期内最慢一次成功查询缩放，最低可见一个"点"）
- * - 底部一排指标：最近调用时间、来源、平均首字、平均响应、总输入、总输出、总费用
+ * 单个 (channel, model) 可用性监控行（横向长条，与日志卡片同风格）
+ * - 左上：模型 logo + 模型名 / 渠道名 + 冷静标注
+ * - 右上：可用性竖条区（等宽固定 4px，固定高度 32px，最多显示最近 30 次）
+ * - 下方：一行紧凑指标（最近调用/平均首字/平均总耗时/总输入/总输出/总费用/来源）
  */
 export function MonitorCard({ row, t }: { row: MonitorRow; t: (key: string) => string }) {
     const { Avatar: ModelAvatar, color: brandColor } = useMemo(
@@ -67,80 +67,79 @@ export function MonitorCard({ row, t }: { row: MonitorRow; t: (key: string) => s
 
     return (
         <TooltipProvider>
-            <div className={`relative rounded-3xl border ${borderClass} bg-card p-4 flex flex-col gap-3 transition-colors`}>
-                {/* 顶部：模型 logo + 渠道 + 模型名 */}
+            <div className={`rounded-3xl border ${borderClass} bg-card w-full px-4 py-3 flex flex-col gap-2 transition-colors`}>
+                {/* 顶行：左上模型信息 + 右上竖条 */}
                 <div className="flex items-center gap-3 min-w-0">
-                    <ModelAvatar size={34} />
+                    <ModelAvatar size={28} />
                     <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2 min-w-0">
-                            <span className="font-semibold text-card-foreground truncate" style={{ color: brandColor }}>
+                        <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="font-semibold text-sm text-card-foreground truncate" style={{ color: brandColor }} title={row.model_name}>
                                 {row.model_name}
                             </span>
                             {isCooling && (
-                                <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400">
+                                <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400" title={yellowLeft > 0 ? t('cooldownYellow') : t('cooldownRed')}>
                                     {yellowLeft > 0 ? t('cooldownYellow') : t('cooldownRed')} {Math.max(yellowLeft, redLeft)}s
                                 </span>
                             )}
                         </div>
-                        <div className="text-xs text-muted-foreground truncate">{row.channel_name}</div>
+                        <div className="text-xs text-muted-foreground truncate" title={row.channel_name}>{row.channel_name}</div>
+                    </div>
+
+                    {/* 右上：可用性竖条区 */}
+                    <div className="flex items-end h-8 gap-[3px] shrink-0 w-[210px] justify-end overflow-hidden">
+                        {calls.length === 0 && (
+                            <div className="flex items-center text-xs text-muted-foreground gap-1.5">
+                                <Loader2 className="size-3 animate-spin" />
+                                <span>{t('waiting')}</span>
+                            </div>
+                        )}
+                        {calls.slice(-30).map((c) => {
+                            const meta = STATUS_META[c.status];
+                            let heightPct = 100;
+                            if (c.status === 'ok') {
+                                const ms = c.use_time > 0 ? c.use_time : c.ftut;
+                                heightPct = maxSuccessMs > 0 ? Math.max(10, Math.round((ms / maxSuccessMs) * 100)) : 10;
+                            }
+                            return (
+                                <Tooltip key={c.seq}>
+                                    <TooltipTrigger asChild>
+                                        <div
+                                            className="w-1 rounded-sm shrink-0"
+                                            style={{ height: `${heightPct}%`, backgroundColor: meta.color }}
+                                        />
+                                    </TooltipTrigger>
+                                    <TooltipContent className="border bg-card p-2 rounded-xl text-xs flex flex-col gap-0.5">
+                                        <span>{formatTime(c.time)}</span>
+                                        <span>{t(meta.labelKey)}</span>
+                                        <span>{t('use_time')} {formatDuration(c.use_time)}</span>
+                                        {c.status === 'ok' && <span>{t('ftut')} {formatDuration(c.ftut)}</span>}
+                                    </TooltipContent>
+                                </Tooltip>
+                            );
+                        })}
                     </div>
                 </div>
 
-                {/* 竖条区 */}
-                <div className="flex items-end h-24 gap-[2px] overflow-hidden">
-                    {calls.length === 0 && (
-                        <div className="flex items-center text-xs text-muted-foreground gap-1.5">
-                            <Loader2 className="size-3 animate-spin" />
-                            <span>{t('waiting')}</span>
-                        </div>
-                    )}
-                    {calls.map((c, idx) => {
-                        const meta = STATUS_META[c.status];
-                        let heightPct = 100;
-                        if (c.status === 'ok') {
-                            const ms = c.use_time > 0 ? c.use_time : c.ftut;
-                            heightPct = maxSuccessMs > 0 ? Math.max(6, Math.round((ms / maxSuccessMs) * 100)) : 6;
-                        }
-                        return (
-                            <Tooltip key={idx}>
-                                <TooltipTrigger asChild>
-                                    <div
-                                        className="flex-1 min-w-[3px] rounded-sm"
-                                        style={{ height: `${heightPct}%`, backgroundColor: meta.color }}
-                                    />
-                                </TooltipTrigger>
-                                <TooltipContent className="border bg-card p-2 rounded-xl text-xs flex flex-col gap-0.5">
-                                    <span>{formatTime(c.time)}</span>
-                                    <span>{t(meta.labelKey)}</span>
-                                    <span>{t('use_time')} {formatDuration(c.use_time)}</span>
-                                    {c.status === 'ok' && <span>{t('ftut')} {formatDuration(c.ftut)}</span>}
-                                </TooltipContent>
-                            </Tooltip>
-                        );
-                    })}
-                </div>
-
-                {/* 底部一排指标 */}
-                <div className="grid grid-cols-2 md:grid-cols-7 gap-x-2 gap-y-1.5 text-[10px] text-muted-foreground pt-1 border-t border-border/60">
-                    <Metric icon={<Clock className="size-3" style={{ color: brandColor }} />} label={t('lastTime')} value={formatTime(row.time)} />
-                    <Metric icon={<Zap className="size-3 text-amber-500" />} label={t('avgFtut')} value={row.success_count ? formatDuration(Math.round(avgFtut)) : '-'} />
-                    <Metric icon={<Cpu className="size-3 text-blue-500" />} label={t('avgUseTime')} value={row.success_count ? formatDuration(Math.round(avgUseTime)) : '-'} />
-                    <Metric icon={<ArrowDownToLine className="size-3 text-green-500" />} label={t('totalInput')} value={formatToken(row.input_total)} />
-                    <Metric icon={<ArrowUpFromLine className="size-3 text-purple-500" />} label={t('totalOutput')} value={formatToken(row.output_total)} />
-                    <Metric icon={<DollarSign className="size-3 text-emerald-500" />} label={t('totalCost')} value={Number(row.cost_total ?? 0).toFixed(6)} />
-                    <Metric icon={<Timer className="size-3 text-orange-500" />} label={t('source')} value={row.last_source_name || t('apiSource')} />
+                {/* 下方：一行紧凑指标 */}
+                <div className="flex items-center gap-x-4 text-xs text-muted-foreground pt-1 border-t border-border/60 min-w-0">
+                    <Metric icon={<Clock className="size-3.5 shrink-0" style={{ color: brandColor }} />} label={t('lastTime')} value={formatTime(row.time)} />
+                    <Metric icon={<Zap className="size-3.5 shrink-0 text-amber-500" />} label={t('avgFtut')} value={row.success_count ? formatDuration(Math.round(avgFtut)) : '-'} />
+                    <Metric icon={<Cpu className="size-3.5 shrink-0 text-blue-500" />} label={t('avgUseTime')} value={row.success_count ? formatDuration(Math.round(avgUseTime)) : '-'} />
+                    <Metric icon={<ArrowDownToLine className="size-3.5 shrink-0 text-green-500" />} label={t('totalInput')} value={formatToken(row.input_total)} />
+                    <Metric icon={<ArrowUpFromLine className="size-3.5 shrink-0 text-purple-500" />} label={t('totalOutput')} value={formatToken(row.output_total)} />
+                    <Metric icon={<DollarSign className="size-3.5 shrink-0 text-emerald-500" />} label={t('totalCost')} value={Number(row.cost_total ?? 0).toFixed(4)} />
+                    <Metric icon={<Timer className="size-3.5 shrink-0 text-orange-500" />} label={t('source')} value={row.last_source_name || t('apiSource')} />
                 </div>
             </div>
         </TooltipProvider>
     );
 }
 
-function Metric({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+function Metric({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
     return (
-        <div className="flex items-center gap-1 min-w-0" title={label}>
+        <div className="flex items-center gap-1.5 min-w-0" title={`${label}: ${value}`}>
             {icon}
-            <span className="text-muted-foreground/80 shrink-0">{label}</span>
-            <span className="truncate ml-auto tabular-nums">{value}</span>
+            <span className="truncate tabular-nums">{value}</span>
         </div>
     );
 }

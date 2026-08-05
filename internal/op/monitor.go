@@ -3,11 +3,13 @@ package op
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 // MonitorCall 统计周期内该 (channel, model) 的一次渠道尝试。
 // Status: ok=成功响应, 429=上游429无可用key, error=其他转发错误(超时等), cancel=上下文取消。
 type MonitorCall struct {
+	Seq     int64   `json:"seq"`    // 全局自增序号，用于前端稳定 key（滚动窗口不错位）
 	Time    int64   `json:"time"`
 	Status  string  `json:"status"`
 	Ftut    int64   `json:"ftut"`     // 首字时间(ms)，仅成功时有效
@@ -49,6 +51,9 @@ const monitorWindowSize = 30 // 每个 (channel, model) 保留的最近尝试条
 
 var monitorCacheLock sync.Mutex
 var monitorCache = make(map[string]*MonitorRow)
+
+// monitorCallSeq 全局自增序号，保证每条 MonitorCall 有唯一 seq 供前端做稳定 key。
+var monitorCallSeq atomic.Int64
 
 var monitorSubscribers = make(map[chan struct{}]struct{})
 var monitorSubscribersLock sync.RWMutex
@@ -103,6 +108,7 @@ func MonitorCallAdd(channelID int, channelName, modelName string, call MonitorCa
 	row.ChannelName = channelName // 渠道改名时回填最新名
 
 	row.Count++
+	call.Seq = monitorCallSeq.Add(1) // 分配全局唯一序号，供前端稳定 key
 	row.InputTotal += call.Input
 	row.OutputTotal += call.Output
 	row.CostTotal += call.Cost

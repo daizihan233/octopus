@@ -126,14 +126,26 @@ There is **no Makefile**, no golangci-lint config, and essentially **no Go test 
 | `release` | `.github/workflows/release.yaml` | push to `master` / manual dispatch | `scripts/build.sh release` → GitHub Release assets + Docker (Alpine + Debian) to GHCR/Docker Hub |
 | `changelog` | `.github/workflows/changelog.yml` | push tag `v*` | `changelogithub` creates a GitHub Release with auto-generated notes → force-merges `dev` → `master` |
 
-**Correct release flow:**
+**Correct release flow (with critical timing caveat):**
 1. Commit + push to `dev`
 2. `git checkout master && git merge dev && git push` — triggers `release.yaml`
 3. `git tag v0.10.XX && git push origin v0.10.XX` — triggers `changelog.yml` which creates the Release + merges dev back to master
 
 ⚠️ **Don't** manually create a release with `gh release create` before pushing the tag — `changelog.yml` will fail with 422 (duplicate). Let the workflow create it.
 
-⚠️ The `release.yaml` workflow always checks out `ref: master` and uses `git describe --tags --abbrev=0` to find the latest tag. It reuses that tag for the release. It does **not** create new tags.
+⚠️ **Timing race (the real gotcha, seen in practice):** The `release.yaml` workflow checks out `ref: master` then runs `git describe --tags --abbrev=0` (in `build.sh` and again in the "Get latest tag" step) to find the *latest* tag and uses it for the Release `tag_name` and the Docker image tags. If you `git push master` (step 2) and only *then* `git push origin v0.X` (step 3), the release workflow usually starts on the master push and runs its checkout + `git fetch --tags` **before** the tag has landed on the remote — so `git describe` falls back to the **previous** tag. Consequences:
+   - the archives get uploaded to the *old* release (`softprops/action-gh-release` with `overwrite_files: true` overwrites its assets!), and
+   - Docker images get tagged with the old version too, while the new tag's release sits empty.
+
+   **To avoid it**, don't split the two pushes ~seconds apart. Because the release run is *started* by the master push, the only reliable way to guarantee the new tag already exists when the workflow snapshots tags is to push the tag **before** the release job reaches `Describe` — which you can't control from a single push. The robust fix is: after pushing `master` + tag, **verify assets landed on the correct release** (`gh release view v0.X --json assets`). If they landed on the wrong/old release (or the run failed), **re-run `release.yaml` via manual dispatch** (`gh workflow run release.yaml --ref master`). On a manual dispatch the tag is already on the remote, so `git describe` resolves to the new tag and rebuilds/records everything correctly.
+
+**What `release.yaml` actually does (in order), so you know what to verify:**
+   `checkout ref:master` → `git fetch --tags --force` → `build.sh release` (builds frontend + 8 platform archives, `GIT_VERSION` = `git describe --tags --abbrev=0` injected into `internal/conf.Version`) → "Get latest tag" (`git describe --tags --match 'v[0-9]*' --abbrev=0`, stored as `TAG_NAME`) → `Upload Release` (`softprops/action-gh-release`, files=`build/archives/*` → release whose tag is `TAG_NAME`, `overwrite_files: true`) → docker build+push Alpine then Debian (tags `latest`, `latest-alpine`, `$TAG_NAME`, `$TAG_NAME-alpine` → GHCR + Docker Hub).
+   The whole job is **one job**; a failure in any later step (often the final Debian docker push hitting GitHub 403 secondary rate-limit) still leaves earlier steps done — e.g. archives already uploaded. If only the docker push failed, the fork is: clean up any misplaced assets, then manually dispatch a fresh `release.yaml` run.
+
+**How to inspect a build:** `gh run view <run-id> --repo <owner>/octopus --json jobs` for step-level outcomes, `--log-failed` for the failing step's log. Common infra failure = GitHub secondary rate-limit (HTTP 403 "You have exceeded a secondary rate limit") on GHCR push — transient, just retry via manual dispatch after a few minutes.
+
+**`changelog.yml`** (push tag `v*`): `changelogithub` creates the Release with auto-generated notes, then force-merges `dev` into `master` (`git merge origin/dev; git push origin master --force`). So after a tagged release, `master` is force-reset to `dev`'s HEAD — keep them in sync before next release.
 
 - Image names in docs may differ (`bestrui/octopus` vs local `kuohu233/octopus` in `docker-compose.yml`); treat compose as a local sample, not the sole source of truth for public tags.
 
