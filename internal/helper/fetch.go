@@ -12,8 +12,10 @@ import (
 	"os/user"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/bestruirui/octopus/internal/model"
+	"github.com/bestruirui/octopus/internal/utils/log"
 	"github.com/dlclark/regexp2"
 	"github.com/looplj/axonhub/llm"
 	"github.com/looplj/axonhub/llm/transformer"
@@ -331,7 +333,73 @@ func fetchCopilotModels(client *http.Client, ctx context.Context, request model.
 	for _, m := range result.Data {
 		models = append(models, m.ID)
 	}
+
+	// 预启用模型 policy（参考 oh-my-pi）：部分模型（如 Claude、Grok）首次
+	// 使用前需要先接受 policy，否则即使模型名正确也会报 model_not_supported。
+	// 逐个调 POST /models/{id}/policy 启用，失败静默不影响列表返回。
+	enableCopilotModels(ctx, client, copilotToken, baseURL, models)
+
 	return models, nil
+}
+
+// enableCopilotModels 预启用 Copilot 模型的 policy（POST /models/{id}/policy）。
+// 参考 oh-my-pi：批量 5 个并发，失败静默（模型是否需启用由服务端决定）。
+func enableCopilotModels(ctx context.Context, client *http.Client, copilotToken, baseURL string, models []string) {
+	const batchSize = 5
+	for i := 0; i < len(models); i += batchSize {
+		end := i + batchSize
+		if end > len(models) {
+			end = len(models)
+		}
+		var wg sync.WaitGroup
+		for _, id := range models[i:end] {
+			wg.Add(1)
+			go func(modelID string) {
+				defer wg.Done()
+				if err := enableCopilotModel(ctx, client, copilotToken, baseURL, modelID); err != nil {
+					log.Debugf("copilot enable model %s policy: %v", modelID, err)
+				}
+			}(id)
+		}
+		wg.Wait()
+	}
+}
+
+// enableCopilotModel 对单个模型发起 policy 启用请求。
+// 端点与请求头参考 oh-my-pi 的 enableGitHubCopilotModel。
+func enableCopilotModel(ctx context.Context, client *http.Client, copilotToken, baseURL, modelID string) error {
+	body, err := json.Marshal(map[string]string{"state": "enabled"})
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/models/"+modelID+"/policy", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+copilotToken)
+	req.Header.Set("openai-intent", "chat-policy")
+	req.Header.Set("x-interaction-type", "chat-policy")
+	req.Header.Set("Editor-Version", "vscode/1.95.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.26.7")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
+	req.Header.Set("copilot-integration-id", "vscode-chat")
+	req.Header.Set("x-github-api-version", "2025-04-01")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	// 4xx 通常是"无需启用"或"已启用"，不算错误；网络/5xx 才记录
+	if resp.StatusCode >= 500 {
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("policy enable %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
 }
 
 // fetchCopilotToken 用 GitHub token 换取 Copilot JWT。
