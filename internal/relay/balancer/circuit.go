@@ -25,6 +25,7 @@ type circuitEntry struct {
 	ConsecutiveFailures int64
 	LastFailureTime     time.Time
 	TripCount           int // 累计熔断触发次数（用于指数退避）
+	LastStatusCode      int // 触发熔断/最近失败的上游 HTTP 状态码（供监控区分 429 与内部错误）
 	mu                  sync.Mutex
 }
 
@@ -82,8 +83,46 @@ func GetCooldown(tripCount int) time.Duration {
 	return time.Duration(cooldown) * time.Second
 }
 
+// GetLastStatusCode 获取触发熔断/最近失败的上游 HTTP 状态码。
+func GetLastStatusCode(channelID, keyID int, modelName string) int {
+	key := circuitKey(channelID, keyID, modelName)
+	v, ok := globalBreaker.Load(key)
+	if !ok {
+		return 0
+	}
+	entry := v.(*circuitEntry)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	return entry.LastStatusCode
+}
+
+// GetCooldownRemaining 查询熔断器剩余冷却时间（只读，不触发 Open→HalfOpen 状态转换）。
+// 与 IsTripped 不同：IsTripped 在冷却到期时会转换状态（副作用），导致监控查询后边框消失。
+// 返回 tripped=true 表示仍在熔断冷却中，remaining 为剩余时间。
+func GetCooldownRemaining(channelID, keyID int, modelName string) (tripped bool, remaining time.Duration) {
+	key := circuitKey(channelID, keyID, modelName)
+	v, ok := globalBreaker.Load(key)
+	if !ok {
+		return false, 0
+	}
+	entry := v.(*circuitEntry)
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+	if entry.State != StateOpen {
+		return false, 0
+	}
+	cooldown := GetCooldown(entry.TripCount)
+	elapsed := time.Since(entry.LastFailureTime)
+	if elapsed >= cooldown {
+		return false, 0
+	}
+	return true, cooldown - elapsed
+}
+
 // IsTripped 检查通道是否处于熔断状态
 // 返回 tripped=true 表示该通道应被跳过，remaining 为剩余冷却时间
+// 注意：冷却到期时会触发 Open→HalfOpen 状态转换（有副作用）；
+//       监控查询请用 GetCooldownRemaining 避免副作用。
 func IsTripped(channelID, keyID int, modelName string) (tripped bool, remaining time.Duration) {
 	key := circuitKey(channelID, keyID, modelName)
 	v, ok := globalBreaker.Load(key)
@@ -141,8 +180,9 @@ func RecordSuccess(channelID, keyID int, modelName string) {
 	entry.TripCount = 0
 }
 
-// RecordFailure 记录失败，可能触发熔断
-func RecordFailure(channelID, keyID int, modelName string) {
+// RecordFailure 记录失败，可能触发熔断。
+// statusCode 为上游 HTTP 状态码（0 表示未知），用于监控区分 429 与内部错误。
+func RecordFailure(channelID, keyID int, modelName string, statusCode int) {
 	key := circuitKey(channelID, keyID, modelName)
 	entry := getOrCreateEntry(key)
 
@@ -150,6 +190,9 @@ func RecordFailure(channelID, keyID int, modelName string) {
 	defer entry.mu.Unlock()
 
 	entry.LastFailureTime = time.Now()
+	if statusCode != 0 {
+		entry.LastStatusCode = statusCode
+	}
 
 	switch entry.State {
 	case StateClosed:

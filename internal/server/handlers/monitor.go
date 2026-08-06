@@ -42,6 +42,7 @@ type monitorRowResp struct {
 	op.MonitorRow
 	YellowCooldown int64 `json:"yellow_cooldown"` // 剩余冷静周期(秒)：key 被 429 冷却
 	RedCooldown    int64 `json:"red_cooldown"`    // 剩余冷静周期(秒)：熔断 Open
+	HasCircuitBreak bool `json:"has_circuit_break"` // 是否处于熔断冷却（用于排序置底）
 }
 
 // monitorPayload 监控页面的完整实时载荷：可用性行 + 最近一条日志。
@@ -147,21 +148,28 @@ func buildMonitorPayload(ctx context.Context) monitorPayload {
 		r.YellowCooldown = yellow
 
 		var red int64
+		var hasCircuitBreak bool
 		for _, key := range ch.Keys {
-			tripped, remaining := balancer.IsTripped(ch.ID, key.ID, row.ModelName)
+			tripped, remaining := balancer.GetCooldownRemaining(ch.ID, key.ID, row.ModelName)
 			if tripped && remaining > 0 {
 				sec := int64(remaining.Seconds())
 				if sec > red {
 					red = sec
 				}
+				hasCircuitBreak = true
 			}
 		}
 		r.RedCooldown = red
+		r.HasCircuitBreak = hasCircuitBreak
 		out = append(out, r)
 	}
 
-	// 按使用频率由高到低排序：最后一次调用时间倒序为主，其次按调用次数
+	// 排序：熔断中的模型置底，其余按最后调用时间倒序 + 调用次数
 	sort.SliceStable(out, func(i, j int) bool {
+		// 熔断中的模型排到最后
+		if out[i].HasCircuitBreak != out[j].HasCircuitBreak {
+			return !out[i].HasCircuitBreak // false(非熔断) 排在 true(熔断) 前面
+		}
 		if out[i].CapturedAt != out[j].CapturedAt {
 			return out[i].CapturedAt > out[j].CapturedAt
 		}

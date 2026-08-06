@@ -170,6 +170,11 @@ func monitorCallStatus(a model.ChannelAttempt) string {
 		}
 		return "error"
 	case model.AttemptCircuitBreak:
+		// 熔断跳过：根据触发熔断时的上游 HTTP 状态码区分原因。
+		// 429 = 上游限流触发熔断（黄色），其他 = 内部错误触发熔断（红色）。
+		if a.StatusCode == http.StatusTooManyRequests {
+			return "429"
+		}
 		return "error"
 	default:
 		return "error"

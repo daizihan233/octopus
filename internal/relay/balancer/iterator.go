@@ -94,7 +94,7 @@ func (it *Iterator) Skip(channelID, channelKeyID int, channelName, msg string) {
 	})
 }
 
-// SkipCircuitBreak 检查熔断状态，若已熔断自动记录（含剩余冷却时间）并返回 true
+// SkipCircuitBreak 检查熔断状态，若已熔断自动记录（含剩余冷却时间+上游状态码）并返回 true
 func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName string) bool {
 	modelName := it.candidates[it.index].ModelName
 	tripped, remaining := IsTripped(channelID, channelKeyID, modelName)
@@ -105,6 +105,8 @@ func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName st
 	if remaining > 0 {
 		msg = fmt.Sprintf("circuit breaker tripped, remaining cooldown: %ds", int(remaining.Seconds()))
 	}
+	// 读出触发熔断时的上游 HTTP 状态码，供监控竖条区分 429（黄色）与内部错误（红色）。
+	statusCode := GetLastStatusCode(channelID, channelKeyID, modelName)
 	it.count++
 	it.attempts = append(it.attempts, model.ChannelAttempt{
 		ChannelID:    channelID,
@@ -113,6 +115,7 @@ func (it *Iterator) SkipCircuitBreak(channelID, channelKeyID int, channelName st
 		ModelName:    modelName,
 		AttemptNum:   it.count,
 		Status:       model.AttemptCircuitBreak,
+		StatusCode:   statusCode,
 		Sticky:       it.IsSticky(),
 		Msg:          msg,
 	})
