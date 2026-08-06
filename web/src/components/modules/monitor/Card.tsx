@@ -58,7 +58,6 @@ export function MonitorCard({ row, t }: { row: MonitorRow; t: (key: string) => s
     const yellowLeft = Math.max(0, row.yellow_cooldown);
     const redLeft = Math.max(0, row.red_cooldown);
 
-    const isCooling = yellowLeft > 0 || redLeft > 0;
     const borderClass = yellowLeft > 0
         ? 'border-yellow-500/70'
         : redLeft > 0
@@ -76,9 +75,14 @@ export function MonitorCard({ row, t }: { row: MonitorRow; t: (key: string) => s
                             <span className="font-semibold text-sm text-card-foreground truncate" style={{ color: brandColor }} title={row.model_name}>
                                 {row.model_name}
                             </span>
-                            {isCooling && (
-                                <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400" title={yellowLeft > 0 ? t('cooldownYellow') : t('cooldownRed')}>
-                                    {yellowLeft > 0 ? t('cooldownYellow') : t('cooldownRed')} {Math.max(yellowLeft, redLeft)}s
+                            {yellowLeft > 0 && (
+                                <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-600 dark:text-amber-400" title={t('cooldownYellow')}>
+                                    {t('cooldownYellow')} {yellowLeft}s
+                                </span>
+                            )}
+                            {redLeft > 0 && (
+                                <span className="shrink-0 flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-md bg-red-500/15 text-red-600 dark:text-red-400" title={t('cooldownRed')}>
+                                    {t('cooldownRed')} {redLeft}s
                                 </span>
                             )}
                         </div>
