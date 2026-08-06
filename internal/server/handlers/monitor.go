@@ -164,16 +164,28 @@ func buildMonitorPayload(ctx context.Context) monitorPayload {
 		out = append(out, r)
 	}
 
-	// 排序：熔断中的模型置底，其余按最后调用时间倒序 + 调用次数
+	// 三级排序：可用（按最近调用时间从近到远）→ 冷却/熔断（按剩余时间从短到长）
 	sort.SliceStable(out, func(i, j int) bool {
-		// 熔断中的模型排到最后
-		if out[i].HasCircuitBreak != out[j].HasCircuitBreak {
-			return !out[i].HasCircuitBreak // false(非熔断) 排在 true(熔断) 前面
+		iCooling := out[i].YellowCooldown > 0 || out[i].HasCircuitBreak
+		jCooling := out[j].YellowCooldown > 0 || out[j].HasCircuitBreak
+
+		// 第一级：可用排在冷却/熔断前面
+		if iCooling != jCooling {
+			return !iCooling
 		}
-		if out[i].CapturedAt != out[j].CapturedAt {
-			return out[i].CapturedAt > out[j].CapturedAt
+
+		// 第二级：可用模型按最近调用时间从近到远
+		if !iCooling {
+			if out[i].CapturedAt != out[j].CapturedAt {
+				return out[i].CapturedAt > out[j].CapturedAt
+			}
+			return out[i].Count > out[j].Count
 		}
-		return out[i].Count > out[j].Count
+
+		// 第三级：冷却/熔断模型按最大剩余冷却时间从短到长（快恢复的排前面）
+		iMax := max(out[i].YellowCooldown, out[i].RedCooldown)
+		jMax := max(out[j].YellowCooldown, out[j].RedCooldown)
+		return iMax < jMax
 	})
 
 	// 最近一条日志（供顶部卡片展示）——裁剪掉完整请求/响应内容，避免在 API 响应中
