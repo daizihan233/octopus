@@ -272,7 +272,7 @@ func fetchMiMoJWT(ctx context.Context, client *http.Client, baseURL string) (str
 
 // fetchCopilotModels 调用 Copilot 的 /models 端点获取当前账号可用模型。
 // channel key 是 OAuthCredentials JSON，从中取出 access_token 换 Copilot JWT 再拉模型。
-// 兜底追加 "auto" 模型，保证 Free/学生账号即便返回列表里没有 auto 也能透传使用。
+// 返回的是 /models 的真实模型 id 列表（如 gpt-4.1、gpt-5-mini），不含任何占位名。
 func fetchCopilotModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
 	credsJSON := request.GetChannelKey().ChannelKey
 	if credsJSON == "" {
@@ -324,17 +324,12 @@ func fetchCopilotModels(client *http.Client, ctx context.Context, request model.
 		return nil, err
 	}
 
-	models := make([]string, 0, len(result.Data)+1)
-	hasAuto := false
+	// 直接使用 /models 返回的真实模型 id。不要追加 "auto" 之类的占位名——
+	// Copilot 上游只接受目录中的具体模型 id（gpt-4.1、gpt-5-mini 等），
+	// 传不存在的名字会返回 model_not_supported。
+	models := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
-		if m.ID == "auto" {
-			hasAuto = true
-		}
 		models = append(models, m.ID)
-	}
-	// Free/学生账号可能不返回 auto，但 Copilot 服务端始终接受 "auto" 作为合法模型名，透传即可
-	if !hasAuto {
-		models = append([]string{"auto"}, models...)
 	}
 	return models, nil
 }

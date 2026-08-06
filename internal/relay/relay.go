@@ -28,6 +28,12 @@ import (
 	"github.com/looplj/axonhub/llm/transformer"
 )
 
+// Copilot 上游 fleet skew 重试参数（参考 oh-my-pi：flat delay + 8 次）。
+const (
+	copilotModelRetryMaxAttempts = 8
+	copilotModelRetryDelay       = 400 * time.Millisecond
+)
+
 // Handler 返回处理入站请求并转发到上游服务的 Gin handler。
 func Handler(inboundType llm.APIFormat) gin.HandlerFunc {
 	inAdapter := newInbound(inboundType)
@@ -116,6 +122,15 @@ func (r *relayRun) run() {
 			return
 		}
 		lastErr = err
+
+		// Copilot 上游存在 fleet skew：模型名正确时也会偶发
+		// model_not_supported / model_not_available_for_integrator（HTTP 400）。
+		// 这是瞬态错误，同一 channel 上重试即可命中可用后端（参考 oh-my-pi 的做法）。
+		if attempt.channel != nil && attempt.channel.Type == dbmodel.ChannelTypeCopilot && isCopilotTransientModelError(err) {
+			if retried := r.retryCopilotAttempt(attempt, ctx); retried {
+				return
+			}
+		}
 	}
 
 	if lastErr == nil {
@@ -123,6 +138,44 @@ func (r *relayRun) run() {
 	}
 	r.metrics.Save(ctx, false, lastErr, r.iter.Attempts())
 	resp.Error(r.c, http.StatusBadGateway, lastErr.Error())
+}
+
+// retryCopilotAttempt 在 Copilot 渠道上重试瞬态模型错误（最多 8 次，flat 400ms 延迟）。
+// 返回 true 表示最终成功（请求已写完）；false 表示重试完仍失败（继续走外层候选循环）。
+func (r *relayRun) retryCopilotAttempt(attempt *relayAttempt, ctx context.Context) bool {
+	for i := 0; i < copilotModelRetryMaxAttempts-1; i++ {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(copilotModelRetryDelay):
+		}
+
+		written, err := attempt.run()
+		if err == nil {
+			r.metrics.Save(ctx, true, nil, r.iter.Attempts())
+			return true
+		}
+		if written {
+			r.metrics.Save(ctx, false, err, r.iter.Attempts())
+			return true
+		}
+		if !isCopilotTransientModelError(err) {
+			return false
+		}
+	}
+	return false
+}
+
+// isCopilotTransientModelError 判断是否为 Copilot 的瞬态模型可用性错误。
+// 参考 oh-my-pi：这两个 code 表示 fleet skew，重试通常能命中可用后端。
+func isCopilotTransientModelError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "model_not_supported") ||
+		strings.Contains(msg, "model_not_available_for_integrator") ||
+		strings.Contains(msg, "not available for integrator")
 }
 
 func (r *relayRun) prepareAttempt() (*relayAttempt, error) {
