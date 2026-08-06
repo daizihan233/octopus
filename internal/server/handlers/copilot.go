@@ -16,7 +16,7 @@ const (
 	copilotClientID   = "Iv1.b507a08c87ecfe98"
 	copilotDeviceAuth = "https://github.com/login/device/code"
 	copilotTokenURL   = "https://github.com/login/oauth/access_token"
-	copilotScopes     = "read:user"
+	copilotScopes     = "copilot"
 )
 
 // deviceFlowState 保存单次 device flow 会话的设备码状态，由前端轮询用。

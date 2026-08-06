@@ -274,7 +274,9 @@ func fetchMiMoJWT(ctx context.Context, client *http.Client, baseURL string) (str
 
 // fetchCopilotModels 调用 Copilot 的 /models 端点获取当前账号可用模型。
 // channel key 是 OAuthCredentials JSON，从中取出 access_token 换 Copilot JWT 再拉模型。
-// 返回的是 /models 的真实模型 id 列表（如 gpt-4.1、gpt-5-mini），不含任何占位名。
+// 返回的是可通过 /chat/completions 真实调用的模型 id 列表：
+// - 目录中的 auto / *-auto / *-free-auto 是 Auto 路由器别名，直接传会 400 model_not_supported；
+// - Free/Student 账号目录还会列出 premium 模型，必须按计划白名单过滤（参考 The AI Counsel）。
 func fetchCopilotModels(client *http.Client, ctx context.Context, request model.Channel) ([]string, error) {
 	credsJSON := request.GetChannelKey().ChannelKey
 	if credsJSON == "" {
@@ -291,6 +293,13 @@ func fetchCopilotModels(client *http.Client, ctx context.Context, request model.
 	copilotToken, err := fetchCopilotToken(ctx, client, creds.AccessToken)
 	if err != nil {
 		return nil, err
+	}
+
+	// 查询账号计划：Free/Student 的目录和付费账号差异很大，需要据此过滤。
+	// 查询失败时降级按付费目录过滤，不阻塞模型拉取。
+	isFreePlan, err := fetchCopilotAccountInfo(ctx, client, creds.AccessToken)
+	if err != nil {
+		log.Debugf("copilot account info lookup failed, assume paid plan: %v", err)
 	}
 
 	baseURL := strings.TrimRight(request.GetBaseUrl(), "/")
@@ -318,20 +327,26 @@ func fetchCopilotModels(client *http.Client, ctx context.Context, request model.
 	}
 
 	var result struct {
-		Data []struct {
-			ID string `json:"id"`
-		} `json:"data"`
+		Data []copilotModelEntry `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, err
 	}
 
-	// 直接使用 /models 返回的真实模型 id。不要追加 "auto" 之类的占位名——
-	// Copilot 上游只接受目录中的具体模型 id（gpt-4.1、gpt-5-mini 等），
-	// 传不存在的名字会返回 model_not_supported。
+	// 只保留 chat/completions 可调用的模型 id。auto 等路由器别名和 Free 账号
+	// 无权使用的 premium 模型都会被过滤，避免透传后上游 400 model_not_supported。
 	models := make([]string, 0, len(result.Data))
 	for _, m := range result.Data {
+		if !isCopilotCallableModel(m, isFreePlan) {
+			continue
+		}
 		models = append(models, m.ID)
+	}
+
+	// Free/Student 账号目录常只返回 auto 或过滤后为空：兜底返回 chat/completions
+	// 实测可用的种子模型（参考 The AI Counsel 的 COPILOT_MODEL_SEEDS）。
+	if len(models) == 0 {
+		models = append(models, "gpt-4.1", "gpt-4o")
 	}
 
 	// 预启用模型 policy（参考 oh-my-pi）：部分模型（如 Claude、Grok）首次
@@ -340,6 +355,118 @@ func fetchCopilotModels(client *http.Client, ctx context.Context, request model.
 	enableCopilotModels(ctx, client, copilotToken, baseURL, models)
 
 	return models, nil
+}
+
+// copilotModelEntry /models 响应的单条模型记录，只保留过滤所需的字段。
+type copilotModelEntry struct {
+	ID                  string   `json:"id"`
+	SupportedEndpoints  []string `json:"supported_endpoints"`
+	ModelPickerEnabled  *bool    `json:"model_picker_enabled"`
+	Capabilities        struct {
+		Family string `json:"family"`
+	} `json:"capabilities"`
+	Policy struct {
+		State string `json:"state"`
+	} `json:"policy"`
+}
+
+// copilotFreeSKUs 视为 Free/Student 计划的 access_type_sku（参考 The AI Counsel / relay-ai）。
+var copilotFreeSKUs = map[string]bool{
+	"free_limited_copilot":    true,
+	"free_educational_quota":  true,
+	"no_auth_limited_copilot": true,
+}
+
+// copilotFreeModelAllowlist Free/Student 计划在 chat/completions 实测可调的模型白名单；
+// 目录会过度列出模型，Free 计划手动选择只允许这些（参考 The AI Counsel）。
+var copilotFreeModelAllowlist = map[string]bool{
+	"gpt-4.1":     true,
+	"gpt-4o":      true,
+	"gpt-4o-mini": true,
+	"raptor-mini": true,
+	"goldeneye":   true,
+}
+
+// copilotFreeModelBlocklist 目录常把这些标成可用，但 Free 计划的 chat/completions 会拒绝。
+var copilotFreeModelBlocklist = map[string]bool{
+	"gpt-5-mini": true,
+}
+
+// fetchCopilotAccountInfo 查询 GitHub 账号的 Copilot 计划（GET /copilot_internal/user）。
+// 返回 true 表示 Free/Student 计划（需要按白名单限制模型选择）。
+func fetchCopilotAccountInfo(ctx context.Context, client *http.Client, accessToken string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/copilot_internal/user", nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.26.7")
+	req.Header.Set("X-Github-Api-Version", "2025-04-01")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return false, fmt.Errorf("copilot account lookup %d: %s", resp.StatusCode, string(body))
+	}
+
+	var data struct {
+		AccessTypeSKU string `json:"access_type_sku"`
+		CopilotPlan   string `json:"copilot_plan"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return false, err
+	}
+	sku := strings.ToLower(strings.TrimSpace(data.AccessTypeSKU))
+	plan := strings.ToLower(strings.TrimSpace(data.CopilotPlan))
+	return copilotFreeSKUs[sku] || plan == "free", nil
+}
+
+// isCopilotCallableModel 判断模型能否通过 /chat/completions 调用。
+// auto 及 *-auto / *-free-auto 是 Auto 路由器别名，不是可调用模型 id；
+// Free/Student 计划只保留严格白名单（参考 The AI Counsel）。
+func isCopilotCallableModel(m copilotModelEntry, isFreePlan bool) bool {
+	mid := strings.ToLower(m.ID)
+	if mid == "auto" || strings.HasSuffix(mid, "-auto") || strings.HasSuffix(mid, "-free-auto") {
+		return false
+	}
+	if strings.Contains(mid, "embedding") {
+		return false
+	}
+	if strings.Contains(strings.ToLower(m.Capabilities.Family), "embedding") {
+		return false
+	}
+	// supported_endpoints 非空时必须包含 chat/completions（排除纯 embedding 等端点）
+	if len(m.SupportedEndpoints) > 0 {
+		chatOK := false
+		for _, ep := range m.SupportedEndpoints {
+			ep = strings.ToLower(strings.TrimRight(ep, "/"))
+			if ep == "/chat/completions" || strings.HasSuffix(ep, "chat/completions") {
+				chatOK = true
+				break
+			}
+		}
+		if !chatOK {
+			return false
+		}
+	}
+	if m.ModelPickerEnabled != nil && !*m.ModelPickerEnabled {
+		return false
+	}
+	if strings.EqualFold(m.Policy.State, "disabled") {
+		return false
+	}
+	if isFreePlan {
+		if copilotFreeModelBlocklist[mid] {
+			return false
+		}
+		return copilotFreeModelAllowlist[mid]
+	}
+	return true
 }
 
 // enableCopilotModels 预启用 Copilot 模型的 policy（POST /models/{id}/policy）。

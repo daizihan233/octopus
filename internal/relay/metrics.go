@@ -151,6 +151,11 @@ func (m *RelayMetrics) Save(ctx context.Context, success bool, err error, attemp
 // monitorCallStatus 按需求把每次渠道尝试分类为竖条颜色状态。
 // 绿=成功响应；黄=上游429或所有key都429(no available key)；红=其他错误；灰=context canceled。
 func monitorCallStatus(a model.ChannelAttempt) string {
+	// 客户端断开/请求上下文取消导致的失败不是渠道真实故障，竖条显示灰色（cancel）。
+	msg := strings.ToLower(a.Msg)
+	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "context cancelled") {
+		return "cancel"
+	}
 	switch a.Status {
 	case model.AttemptSuccess:
 		return "ok"
